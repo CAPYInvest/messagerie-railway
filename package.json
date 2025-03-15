@@ -1,0 +1,12 @@
+{
+    "name": "messagerie-railway",
+    "version": "1.0.0",
+    "description": "Test de messagerie simple via Railway",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js"
+    },
+    "dependencies": {
+        "express": "^4.21.2"
+    }
+}
