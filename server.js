@@ -2,20 +2,25 @@
 const express = require('express');
 const app = express();
 
-// Port d'écoute (utilise la variable d'environnement PORT si définie par Railway)
+// Importation du package cors
+const cors = require('cors');
+
+// Configuration du middleware cors
+app.use(cors());
+
+// Port d'écoute
 const port = process.env.PORT || 3000;
 
 // Middleware pour parser le corps des requêtes en JSON
 app.use(express.json());
 
-// Définition d'une route POST pour recevoir le message
+// Votre route POST
 app.post('/api/message', (req, res) => {
   const message = req.body.message;
   if (!message) {
     return res.status(400).json({ error: 'Message manquant' });
   }
   console.log('Message reçu:', message);
-  // Vous pourrez ultérieurement ajouter ici la logique de stockage (ex : base de données)
   res.json({ success: true, message: message });
 });
 
