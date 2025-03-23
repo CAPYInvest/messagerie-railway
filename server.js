@@ -6,7 +6,9 @@ const app = express();
 const cors = require('cors');
 
 // Configuration du middleware cors
-app.use(cors());
+app.use(cors({
+  origin: 'https://capy-invest-fr.webflow.io'
+}));
 
 // Port d'écoute
 const port = process.env.PORT || 3000;
