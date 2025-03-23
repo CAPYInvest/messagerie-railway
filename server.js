@@ -1,13 +1,14 @@
 // Importation d'Express
 const express = require('express');
-const app = express();
-
-// Importation du package cors
 const cors = require('cors');
 
+const app = express();
 // Configuration du middleware cors
 app.use(cors({
-  origin: 'https://capy-invest-fr.webflow.io'
+  origin: 'https://capy-invest-fr.webflow.io',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
 
 // Port d'écoute
