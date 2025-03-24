@@ -189,7 +189,17 @@ app.get('/api/last-message', async (req, res) => {
     }
 
     // Trier par date décroissante (plus récent en premier)
-    allMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    function getTimeValue(ts) {
+      // Si c'est un objet Firestore {seconds, nanoseconds}
+      if (ts && ts.seconds !== undefined) {
+        return ts.seconds * 1000 + Math.floor(ts.nanoseconds / 1e6);
+      }
+      // Sinon, s'il s'agit déjà d'une date ou d'un string date
+      return new Date(ts).getTime();
+    }    
+    allMessages.sort((a, b) => {
+      return getTimeValue(b.timestamp) - getTimeValue(a.timestamp);
+    });   
     console.log("Après tri (du plus récent au plus ancien) :");
     allMessages.forEach(m => {
       console.log(
