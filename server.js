@@ -1,6 +1,8 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
+const http = require('http');          // <-- Pour créer un serveur HTTP
+const { Server } = require('socket.io'); // <-- Socket.io
 
 // --- 1) Import des modules Firebase côté Node.js
 const { initializeApp } = require('firebase/app');
@@ -11,7 +13,7 @@ const {
   getDocs,
   query,
   where
-} = require('firebase/firestore'); // Note : Firestore Lite ou Firestore ?
+} = require('firebase/firestore');
 
 // --- 2) Configuration Firebase (cachée côté serveur)
 const firebaseConfig = {
@@ -29,11 +31,10 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 
-// --- 4) Création du serveur Express
+// --- 4) Création de l'app Express
 const app = express();
 
 // Autorise le JSON et CORS
-// Configuration du middleware cors
 app.use(cors({
   origin: 'https://capy-invest-fr.webflow.io',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -41,6 +42,29 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// ---------------------------------------------------------------------------
+// Création du serveur HTTP et injection de Socket.io
+// ---------------------------------------------------------------------------
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: 'https://capy-invest-fr.webflow.io',
+    methods: ['GET', 'POST']
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Socket.io : lorsque le client se connecte, on peut logger ou gérer des rooms
+// ---------------------------------------------------------------------------
+io.on('connection', (socket) => {
+  console.log('Un client est connecté à Socket.io :', socket.id);
+
+  // Optionnel : vous pouvez écouter des événements côté client, ex: "joinRoom"
+  // socket.on('joinRoom', (roomName) => {
+  //   socket.join(roomName);
+  // });
+});
 
 // ----------------------------------------------
 // ROUTE 1 : POST /api/messages
@@ -63,6 +87,17 @@ app.post('/api/messages', async (req, res) => {
     });
 
     console.log('Nouveau message ajouté :', docRef.id);
+
+    // Émettre un événement "newMessage" via Socket.io
+    // pour avertir tous les clients qu'un nouveau message est disponible
+    io.emit('newMessage', {
+      id: docRef.id,
+      message,
+      senderId,
+      receiverId,
+      timestamp: new Date().toISOString() // ou tout autre format
+    });
+
     return res.json({ success: true, message: 'Message enregistré', id: docRef.id });
   } catch (error) {
     console.error('Erreur lors de l\'ajout du message :', error);
@@ -80,12 +115,6 @@ app.get('/api/messages', async (req, res) => {
     if (!senderId || !recipientId) {
       return res.status(400).json({ error: 'Paramètres senderId et recipientId requis' });
     }
-
-    // Comme Firestore ne gère pas directement le "OR" sur deux champs,
-    // on va faire 2 requêtes :
-    // 1) senderId=senderId & receiverId=recipientId
-    // 2) senderId=recipientId & receiverId=senderId
-    // puis on fusionne les résultats.
 
     const messagesCollection = collection(db, 'messages');
 
@@ -127,8 +156,8 @@ app.get('/api/messages', async (req, res) => {
   }
 });
 
-// --- 5) Lancement du serveur
+// --- 5) Lancement du serveur sur le port
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Serveur Node.js démarré sur le port ${PORT}`);
+httpServer.listen(PORT, () => {
+  console.log(`Serveur Node.js + Socket.io démarré sur le port ${PORT}`);
 });
