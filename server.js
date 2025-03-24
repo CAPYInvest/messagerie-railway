@@ -189,7 +189,7 @@ app.get('/api/last-message', async (req, res) => {
     }
 
     // Trier par date décroissante (plus récent en premier)
-    allMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    allMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     // Le plus récent est le premier
     const lastMsg = allMessages[0];
