@@ -14,14 +14,23 @@ const {
   where
 } = require('firebase/firestore');
 
-// --- 1) Configuration Firebase
+// 1) Config Firebase
 const firebaseConfig = {
-  // ...
+  apiKey: "xxx",
+  authDomain: "capy-invest.firebaseapp.com",
+  databaseURL: "https://capy-invest-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "capy-invest",
+  storageBucket: "capy-investheroku.firebaseapp.com",
+  messagingSenderId: "1056270478078",
+  appId: "1:1056270478078:web:5f54bdabd1f0ce662253af",
+  measurementId: "G-WD1T00C496"
 };
 
+// 2) Init Firebase
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 
+// 3) Express + Socket.io
 const app = express();
 app.use(cors({
   origin: 'https://capy-invest-fr.webflow.io',
@@ -31,9 +40,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// --------------------------------------------------------------------
-// (A) Création du serveur HTTP + Socket.io (si vous faites du temps réel)
-// --------------------------------------------------------------------
+// Serveur HTTP + Socket.io
 const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -43,22 +50,23 @@ const io = new Server(httpServer, {
 });
 
 io.on('connection', (socket) => {
-  console.log('Un client est connecté Socket.io :', socket.id);
+  console.log('Un client est connecté à Socket.io :', socket.id);
 });
 
-// --------------------------------------------------------------------
-// (B) Fonction d’échappement (anti-XSS) la plus simple
-// --------------------------------------------------------------------
+// -------------------------------------------------------------------
+// FONCTION SIMPLE D’ÉCHAPPEMENT (évite XSS en transformant <, >, etc.)
+// -------------------------------------------------------------------
 function sanitizeString(str) {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;'); // échappe aussi l'apostrophe
 }
 
 // ----------------------------------------------
-// ROUTE 1 : POST /api/messages
+// ROUTE 1 : POST /api/messages (ajout d’un message)
 // ----------------------------------------------
 app.post('/api/messages', async (req, res) => {
   try {
@@ -67,10 +75,10 @@ app.post('/api/messages', async (req, res) => {
       return res.status(400).json({ error: 'Champs message, senderId, receiverId requis' });
     }
 
-    // (C) On “sanitize” le message pour éviter tout XSS
+    // Échapper le contenu du message pour éviter le code HTML malveillant
     const safeMessage = sanitizeString(message);
 
-    // Ajoute un document dans Firestore
+    // Enregistrer dans Firestore
     const docRef = await addDoc(collection(db, 'messages'), {
       message: safeMessage,
       senderId,
@@ -80,7 +88,7 @@ app.post('/api/messages', async (req, res) => {
 
     console.log('Nouveau message ajouté :', docRef.id);
 
-    // (D) Si vous faites du temps réel, émettre un événement
+    // Émettre un événement temps réel si vous utilisez Socket.io
     io.emit('newMessage', {
       id: docRef.id,
       message: safeMessage,
@@ -97,7 +105,7 @@ app.post('/api/messages', async (req, res) => {
 });
 
 // ----------------------------------------------
-// ROUTE 2 : GET /api/messages
+// ROUTE 2 : GET /api/messages?senderId=xxx&recipientId=yyy
 // ----------------------------------------------
 app.get('/api/messages', async (req, res) => {
   try {
@@ -131,7 +139,7 @@ app.get('/api/messages', async (req, res) => {
       results.push({ id: doc.id, ...doc.data() });
     });
 
-    // Trier par date
+    // Tri par date
     results.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     return res.json(results);
@@ -141,8 +149,8 @@ app.get('/api/messages', async (req, res) => {
   }
 });
 
-// --- Lancement du serveur
+// 5) Lancement
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
-  console.log(`Serveur Node.js démarré sur le port ${PORT}`);
+  console.log(`Serveur Node.js + Socket.io démarré sur le port ${PORT}`);
 });
