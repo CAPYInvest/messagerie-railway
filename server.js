@@ -149,6 +149,59 @@ app.get('/api/messages', async (req, res) => {
   }
 });
 
+// ----------------------------------------------
+// ROUTE 3 : GET /api/last-message?userId=....
+// ----------------------------------------------
+
+// Nouvelle route : GET /api/last-message?userId=XXX
+app.get('/api/last-message', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: 'Paramètre userId requis' });
+    }
+
+    // On va récupérer tous les messages où userId est sender OU receiver
+    // Comme Firestore ne gère pas le OR direct sur deux champs,
+    // on fait deux requêtes et on fusionne.
+    const messagesColl = collection(db, 'messages');
+
+    const qA = query(messagesColl, where('senderId', '==', userId));
+    const qB = query(messagesColl, where('receiverId', '==', userId));
+
+    let allMessages = [];
+
+    // Récup query A
+    const snapA = await getDocs(qA);
+    snapA.forEach(doc => {
+      allMessages.push({ id: doc.id, ...doc.data() });
+    });
+
+    // Récup query B
+    const snapB = await getDocs(qB);
+    snapB.forEach(doc => {
+      allMessages.push({ id: doc.id, ...doc.data() });
+    });
+
+    if (allMessages.length === 0) {
+      // Aucun message où userId est impliqué
+      return res.json(null); // ou { message: null }
+    }
+
+    // Trier par date décroissante (plus récent en premier)
+    allMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Le plus récent est le premier
+    const lastMsg = allMessages[0];
+
+    return res.json(lastMsg);
+  } catch (error) {
+    console.error('Erreur /api/last-message :', error);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
+
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
