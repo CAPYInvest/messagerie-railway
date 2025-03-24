@@ -189,11 +189,18 @@ app.get('/api/last-message', async (req, res) => {
     }
 
     // Trier par date décroissante (plus récent en premier)
-    allMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-    // Le plus récent est le premier
+    allMessages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    console.log("Après tri (du plus récent au plus ancien) :");
+    allMessages.forEach(m => {
+      console.log(
+        `messageID=${m.id}`,
+        `sender=${m.senderId}`,
+        `receiver=${m.receiverId}`,
+        `timestamp=${m.timestamp}`
+      );
+    });
     const lastMsg = allMessages[0];
-
+    console.log("Le plus récent message est :", lastMsg);
     return res.json(lastMsg);
   } catch (error) {
     console.error('Erreur /api/last-message :', error);
