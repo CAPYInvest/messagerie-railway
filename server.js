@@ -11,7 +11,9 @@ const {
   addDoc,
   getDocs,
   query,
-  where
+  where,
+  doc,           
+  updateDoc      
 } = require('firebase/firestore');
 
 // 1) Config Firebase
