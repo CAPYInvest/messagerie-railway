@@ -78,12 +78,13 @@ app.post('/api/messages', async (req, res) => {
     // Échapper le contenu du message pour éviter le code HTML malveillant
     const safeMessage = sanitizeString(message);
 
-    // Enregistrer dans Firestore
+    // Ajout dans Firestore avec read: false
     const docRef = await addDoc(collection(db, 'messages'), {
-      message: safeMessage,
+      message,
       senderId,
       receiverId,
-      timestamp: new Date()
+      timestamp: new Date(),
+      read: false   // <-- Important
     });
 
     console.log('Nouveau message ajouté :', docRef.id);
@@ -138,6 +139,13 @@ app.get('/api/messages', async (req, res) => {
     snapshotB.forEach(doc => {
       results.push({ id: doc.id, ...doc.data() });
     });
+
+    for (const msg of results) {
+      if (!msg.read) {
+        const docRef = doc(db, 'messages', msg.id);
+        await updateDoc(docRef, { read: true });
+      }
+    }    
 
     // Tri par date
     results.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -218,9 +226,14 @@ app.get('/api/last-message', async (req, res) => {
   }
 });
 
+
 // ----------------------------------------------
-// ROUTE 4 : GET /api/unread
+// ROUTE : GET /api/unread?userId=xxx
 // ----------------------------------------------
+
+// ATTENTION : Il faut installer et importer les fonctions Firestore côté Node
+//    const { initializeApp } = require('firebase/app');
+//    const { getFirestore, collection, getDocs, query, where } = require('firebase/firestore');
 
 app.get('/api/unread', async (req, res) => {
   try {
@@ -228,37 +241,71 @@ app.get('/api/unread', async (req, res) => {
     if (!userId) {
       return res.status(400).json({ error: 'Paramètre userId requis' });
     }
-    
-    // TODO: Ici, calculez le nombre de messages non lus pour chaque contact
-    // ex: vous parcourez la collection "messages", 
-    //     trouvez ceux reçus par userId et pas encore "lus"
-    //     et regroupez par senderId, etc.
 
-    // Pour l'exemple, renvoyons un tableau bidon :
-    // [
-    //   { contactId: 'mem_abc123', unreadCount: 2, lastMessageTime: '2025-03-27T14:05:00.000Z' },
-    //   { contactId: 'mem_def456', unreadCount: 0, lastMessageTime: '2025-03-26T10:20:00.000Z' }
-    // ]
+    // 1) Récupérer tous les messages "read = false" où receiverId = userId
+    const messagesRef = collection(db, 'messages');
+    const q = query(
+      messagesRef,
+      where('receiverId', '==', userId),
+      where('read', '==', false)
+    );
+    const snapshot = await getDocs(q);
 
-    const result = [
-      {
-        contactId: 'mem_cm76fa3di06di0sskfvxdgb96',
-        unreadCount: 2,
-        lastMessageTime: new Date().toISOString()
-      },
-      {
-        contactId: 'mem_foobar',
-        unreadCount: 0,
-        lastMessageTime: '2025-03-26T10:20:00.000Z'
+    // 2) Regrouper par senderId
+    //    On construit un map : { [senderId]: { unreadCount, lastMessageTime } }
+    const map = new Map();
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const sender = data.senderId;
+      if (!map.has(sender)) {
+        map.set(sender, {
+          contactId: sender,
+          unreadCount: 0,
+          lastMessageTime: 0
+        });
       }
-    ];
+      const obj = map.get(sender);
 
+      // Incrémenter le nombre de non-lus
+      obj.unreadCount++;
+
+      // Gérer la date du dernier message
+      // On convertit data.timestamp (Date ou Firestore Timestamp) en nombre (ms)
+      let ts = 0;
+      if (data.timestamp && data.timestamp.toMillis) {
+        // Firestore Timestamp
+        ts = data.timestamp.toMillis();
+      } else {
+        // Date JS ou string
+        ts = new Date(data.timestamp).getTime();
+      }
+      // Mettre à jour si c'est plus récent
+      if (ts > obj.lastMessageTime) {
+        obj.lastMessageTime = ts;
+      }
+    });
+
+    // 3) Transformer le map en tableau
+    //    ex: [ { contactId, unreadCount, lastMessageTime: "2025-03-27T14:05:00.000Z" }, ... ]
+    const result = Array.from(map.values()).map(item => {
+      return {
+        contactId: item.contactId,
+        unreadCount: item.unreadCount,
+        // Convertir le nombre (ms) en ISO string
+        lastMessageTime: new Date(item.lastMessageTime).toISOString()
+      };
+    });
+
+    // 4) Retourner le tableau
     return res.json(result);
+
   } catch (err) {
     console.error('Erreur /api/unread :', err);
-    res.status(500).json({ error: 'Erreur interne' });
+    return res.status(500).json({ error: 'Erreur interne' });
   }
 });
+
 
 
 // 5) Lancement
