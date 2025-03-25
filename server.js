@@ -116,16 +116,19 @@ app.get('/api/messages', async (req, res) => {
     if (!senderId || !recipientId) {
       return res.status(400).json({ error: 'Paramètres senderId et recipientId requis' });
     }
+    // Pour clarifier les noms :
+    const userId = senderId;    // L'utilisateur courant
+    const otherId = recipientId; // L'autre personne
 
     const messagesCollection = collection(db, 'messages');
 
-    // Query A
+    // Query A : userId -> otherId
     const q1 = query(
       messagesCollection,
       where('senderId', '==', senderId),
       where('receiverId', '==', recipientId)
     );
-    // Query B
+    // Query B : otherId -> userId
     const q2 = query(
       messagesCollection,
       where('senderId', '==', recipientId),
@@ -133,26 +136,32 @@ app.get('/api/messages', async (req, res) => {
     );
 
     let results = [];
+
+    // Récup A
     const snapshotA = await getDocs(q1);
     snapshotA.forEach(doc => {
       results.push({ id: doc.id, ...doc.data() });
     });
+
+    // Récup B
     const snapshotB = await getDocs(q2);
     snapshotB.forEach(doc => {
       results.push({ id: doc.id, ...doc.data() });
     });
 
+    // ⬇️ Marquer "lu" UNIQUEMENT si msg.receiverId === userId
     for (const msg of results) {
-      if (!msg.read) {
+      if (!msg.read && msg.receiverId === userId) {
         const docRef = doc(db, 'messages', msg.id);
         await updateDoc(docRef, { read: true });
       }
-    }    
+    }  
 
     // Tri par date
     results.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     return res.json(results);
+    
   } catch (error) {
     console.error('Erreur lors de la récupération des messages :', error);
     return res.status(500).json({ error: 'Erreur interne' });
