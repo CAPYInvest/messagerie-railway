@@ -218,6 +218,48 @@ app.get('/api/last-message', async (req, res) => {
   }
 });
 
+// ----------------------------------------------
+// ROUTE 4 : GET /api/unread
+// ----------------------------------------------
+
+app.get('/api/unread', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: 'Paramètre userId requis' });
+    }
+    
+    // TODO: Ici, calculez le nombre de messages non lus pour chaque contact
+    // ex: vous parcourez la collection "messages", 
+    //     trouvez ceux reçus par userId et pas encore "lus"
+    //     et regroupez par senderId, etc.
+
+    // Pour l'exemple, renvoyons un tableau bidon :
+    // [
+    //   { contactId: 'mem_abc123', unreadCount: 2, lastMessageTime: '2025-03-27T14:05:00.000Z' },
+    //   { contactId: 'mem_def456', unreadCount: 0, lastMessageTime: '2025-03-26T10:20:00.000Z' }
+    // ]
+
+    const result = [
+      {
+        contactId: 'mem_cm76fa3di06di0sskfvxdgb96',
+        unreadCount: 2,
+        lastMessageTime: new Date().toISOString()
+      },
+      {
+        contactId: 'mem_foobar',
+        unreadCount: 0,
+        lastMessageTime: '2025-03-26T10:20:00.000Z'
+      }
+    ];
+
+    return res.json(result);
+  } catch (err) {
+    console.error('Erreur /api/unread :', err);
+    res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
 
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
