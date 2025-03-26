@@ -38,7 +38,7 @@ const db = getFirestore(firebaseApp);
 const app = express();
 app.use(cors({
   origin: 'https://capy-invest-fr.webflow.io',
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
