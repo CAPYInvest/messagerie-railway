@@ -321,19 +321,17 @@ app.get('/api/unread', async (req, res) => {
 
 //---------------------------------------------------------------------
 // ROUTE 5 : PUT /api/messages/:id
-// Permet de modifier un message existant si on est l’expéditeur
 //---------------------------------------------------------------------
 app.put('/api/messages/:id', async (req, res) => {
   try {
     const messageId = req.params.id;
     const { userId, newContent } = req.body; 
-    // userId = l'utilisateur courant, newContent = nouveau texte du message
 
     if (!messageId || !userId || !newContent) {
       return res.status(400).json({ error: 'Données manquantes (messageId, userId, newContent)' });
     }
 
-    // On récupère le document Firestore
+    // 1) Récupérer le document Firestore
     const docRef = doc(db, 'messages', messageId);
     const docSnap = await getDoc(docRef);
 
@@ -343,22 +341,22 @@ app.put('/api/messages/:id', async (req, res) => {
 
     const messageData = docSnap.data();
 
-    // Vérification : seul l’expéditeur peut modifier
+    // 2) Vérifier que userId === senderId (seul l’expéditeur peut modifier)
     if (messageData.senderId !== userId) {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
 
-    // Sanitize pour éviter XSS
+    // 3) Sanitize le nouveau contenu pour éviter XSS
     const safeContent = sanitizeString(newContent);
 
-    // Mise à jour dans Firestore
+    // 4) Mettre à jour dans Firestore
     await updateDoc(docRef, {
       message: safeContent
     });
 
     console.log(`Message ${messageId} modifié par ${userId}`);
 
-    // Émettre un événement Socket.io => tous les clients peuvent se mettre à jour
+    // 5) Émettre un événement Socket.io => tous les clients peuvent se mettre à jour
     io.emit('messageUpdated', {
       id: messageId,
       senderId: messageData.senderId,
@@ -369,19 +367,17 @@ app.put('/api/messages/:id', async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     console.error('Erreur lors de la modification du message :', err);
-    res.status(500).json({ error: 'Erreur interne' });
+    return res.status(500).json({ error: 'Erreur interne' });
   }
 });
 
 //---------------------------------------------------------------------
 // ROUTE 6 : DELETE /api/messages/:id
-// Permet de supprimer un message si on est l’expéditeur
 //---------------------------------------------------------------------
 app.delete('/api/messages/:id', async (req, res) => {
   try {
     const messageId = req.params.id;
-    // userId peut être passé en query ?userId=xxx ou dans le body
-    // Ici, on le récupère en query pour l’exemple
+    // userId passé en query => ?userId=xxx
     const { userId } = req.query;
 
     if (!messageId || !userId) {
@@ -397,7 +393,7 @@ app.delete('/api/messages/:id', async (req, res) => {
 
     const messageData = docSnap.data();
 
-    // Vérification : seul l’expéditeur peut supprimer
+    // Vérifier que userId === senderId (seul l’expéditeur peut supprimer)
     if (messageData.senderId !== userId) {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
@@ -413,6 +409,14 @@ app.delete('/api/messages/:id', async (req, res) => {
       senderId: messageData.senderId,
       receiverId: messageData.receiverId
     });
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Erreur lors de la suppression du message :', err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
 
     return res.json({ success: true });
   } catch (err) {
