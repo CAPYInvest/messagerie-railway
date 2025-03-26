@@ -361,6 +361,8 @@ app.put('/api/messages/:id', async (req, res) => {
     // Émettre un événement Socket.io => tous les clients peuvent se mettre à jour
     io.emit('messageUpdated', {
       id: messageId,
+      senderId: existingData.senderId,
+      receiverId: existingData.receiverId,
       newContent: safeContent
     });
 
@@ -407,7 +409,9 @@ app.delete('/api/messages/:id', async (req, res) => {
 
     // Émettre un événement Socket.io => tous les clients peuvent se mettre à jour
     io.emit('messageDeleted', {
-      id: messageId
+      id: messageId,
+      senderId: existingData.senderId,
+      receiverId: existingData.receiverId
     });
 
     return res.json({ success: true });
