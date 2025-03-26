@@ -336,13 +336,11 @@ app.put('/api/messages/:id', async (req, res) => {
     // On récupère le document Firestore
     const docRef = doc(db, 'messages', messageId);
     const docSnap = await getDoc(docRef);
-
     if (!docSnap.exists()) {
       return res.status(404).json({ error: 'Message introuvable' });
     }
 
     const messageData = docSnap.data();
-
     // Vérification : seul l’expéditeur peut modifier
     if (messageData.senderId !== userId) {
       return res.status(403).json({ error: 'Action non autorisée' });
@@ -353,7 +351,8 @@ app.put('/api/messages/:id', async (req, res) => {
 
     // Mise à jour dans Firestore
     await updateDoc(docRef, {
-      message: safeContent
+      message: safeContent,
+      edited: true
     });
 
     console.log(`Message ${messageId} modifié par ${userId}`);
@@ -363,7 +362,8 @@ app.put('/api/messages/:id', async (req, res) => {
       id: messageId,
       senderId: messageData.senderId,
       receiverId: messageData.receiverId,
-      newContent: safeContent
+      newContent: safeContent,
+      edited: true    // <-- on signale que c'est édité
     });
 
     return res.json({ success: true });
@@ -390,13 +390,11 @@ app.delete('/api/messages/:id', async (req, res) => {
 
     const docRef = doc(db, 'messages', messageId);
     const docSnap = await getDoc(docRef);
-
     if (!docSnap.exists()) {
       return res.status(404).json({ error: 'Message introuvable' });
     }
 
     const messageData = docSnap.data();
-
     // Vérification : seul l’expéditeur peut supprimer
     if (messageData.senderId !== userId) {
       return res.status(403).json({ error: 'Action non autorisée' });
