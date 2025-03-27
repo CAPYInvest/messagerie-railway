@@ -428,15 +428,25 @@ app.delete('/api/messages/:id', async (req, res) => {
 // (si elle n’existe pas déjà) et génère ensuite un token de réunion à renvoyer au client.
 //---------------------------------------------------------------------
 
+// ------------------------------
+// ROUTE DAILY : Création automatique d'une salle et génération d'un token
+// ------------------------------
+const fetch = require('node-fetch'); // Assurez-vous d'installer node-fetch via "npm install node-fetch"
+
+const DAILY_API_KEY = "1dd665faed96e61789a8e982faf2ffbb6197b4c49fd6bd06394cff9b1df7ae0c";
+
+// Endpoint pour créer (ou récupérer) une salle Daily et générer un token
 app.post('/api/create-room', async (req, res) => {
   const { callerId, calleeId } = req.body;
   if (!callerId || !calleeId) {
     return res.status(400).json({ error: 'Les identifiants callerId et calleeId sont requis.' });
   }
+
+  // Générer un nom de salle déterministe en triant les deux IDs pour garantir l'unicité
   const roomName = 'room_' + [callerId, calleeId].sort().join('_');
   console.log("Nom de salle généré :", roomName);
 
-  // Création de la salle Daily
+  // --- Étape 1 : Créer la salle Daily (si elle n'existe pas déjà) ---
   try {
     const createRoomResponse = await fetch('https://api.daily.co/v1/rooms', {
       method: 'POST',
@@ -448,10 +458,12 @@ app.post('/api/create-room', async (req, res) => {
         name: roomName,
         properties: {
           is_private: true
+          // Vous pouvez ajouter d'autres propriétés ici (ex: expiration, etc.)
         }
       })
     });
 
+    // Si la salle existe déjà, Daily renvoie généralement un code 409 (Conflict)
     if (createRoomResponse.status === 409) {
       console.log("La salle existe déjà :", roomName);
     } else if (!createRoomResponse.ok) {
@@ -464,7 +476,7 @@ app.post('/api/create-room', async (req, res) => {
     return res.status(500).json({ error: 'Erreur lors de la création de la salle.' });
   }
 
-  // Génération du token
+  // --- Étape 2 : Générer un token de réunion pour cette salle ---
   try {
     const tokenResponse = await fetch('https://api.daily.co/v1/meeting-tokens', {
       method: 'POST',
@@ -475,6 +487,7 @@ app.post('/api/create-room', async (req, res) => {
       body: JSON.stringify({
         properties: {
           room: roomName
+          // Vous pouvez ajouter ici des propriétés supplémentaires
         }
       })
     });
@@ -486,6 +499,7 @@ app.post('/api/create-room', async (req, res) => {
     }
 
     const tokenData = await tokenResponse.json();
+    // Construire l'URL de la salle en utilisant votre domaine Daily
     const roomUrl = `https://capy-invest-fr.daily.co/${roomName}`;
     console.log("Salle et token générés :", roomUrl, tokenData.token);
 
@@ -499,6 +513,7 @@ app.post('/api/create-room', async (req, res) => {
     return res.status(500).json({ error: 'Erreur lors de la génération du token.' });
   }
 });
+
 
 
 
