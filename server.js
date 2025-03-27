@@ -421,16 +421,84 @@ app.delete('/api/messages/:id', async (req, res) => {
 
 
 
+//---------------------------------------------------------------------
+// ROUTE 7 : VISIO /api/create-room 
+//  reçoit les identifiants du caller et du callee, génère un nom de salle déterministe 
+// (en triant les deux IDs), tente de créer la salle via l’API Daily 
+// (si elle n’existe pas déjà) et génère ensuite un token de réunion à renvoyer au client.
+//---------------------------------------------------------------------
 
+app.post('/api/create-room', async (req, res) => {
+  const { callerId, calleeId } = req.body;
+  if (!callerId || !calleeId) {
+    return res.status(400).json({ error: 'Les identifiants callerId et calleeId sont requis.' });
+  }
+  const roomName = 'room_' + [callerId, calleeId].sort().join('_');
+  console.log("Nom de salle généré :", roomName);
 
+  // Création de la salle Daily
+  try {
+    const createRoomResponse = await fetch('https://api.daily.co/v1/rooms', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${DAILY_API_KEY}`
+      },
+      body: JSON.stringify({
+        name: roomName,
+        properties: {
+          is_private: true
+        }
+      })
+    });
 
+    if (createRoomResponse.status === 409) {
+      console.log("La salle existe déjà :", roomName);
+    } else if (!createRoomResponse.ok) {
+      const errText = await createRoomResponse.text();
+      console.error("Erreur lors de la création de la salle :", errText);
+      return res.status(500).json({ error: 'Erreur lors de la création de la salle.' });
+    }
+  } catch (error) {
+    console.error("Erreur lors de l'appel à Daily pour créer la salle :", error);
+    return res.status(500).json({ error: 'Erreur lors de la création de la salle.' });
+  }
 
+  // Génération du token
+  try {
+    const tokenResponse = await fetch('https://api.daily.co/v1/meeting-tokens', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${DAILY_API_KEY}`
+      },
+      body: JSON.stringify({
+        properties: {
+          room: roomName
+        }
+      })
+    });
 
+    if (!tokenResponse.ok) {
+      const errText = await tokenResponse.text();
+      console.error("Erreur lors de la génération du token :", errText);
+      return res.status(500).json({ error: 'Erreur lors de la génération du token.' });
+    }
 
+    const tokenData = await tokenResponse.json();
+    const roomUrl = `https://capy-invest-fr.daily.co/${roomName}`;
+    console.log("Salle et token générés :", roomUrl, tokenData.token);
 
-
-
-
+    return res.json({
+      roomName,
+      token: tokenData.token,
+      url: roomUrl
+    });
+  } catch (error) {
+    console.error("Erreur lors de l'appel à Daily pour générer le token :", error);
+    return res.status(500).json({ error: 'Erreur lors de la génération du token.' });
+  }
+});
 
 
 
