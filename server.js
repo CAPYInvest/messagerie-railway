@@ -467,7 +467,8 @@ app.post('/api/create-room', async (req, res) => {
         enable_screenshare: false,
         enable_chat: false,
         start_video_off: (type === "audio"),
-        start_audio_off: false
+        start_audio_off: false,
+        exp: nowInSeconds + 3600  // Expire dans 1 heure
       }
     };
 
@@ -493,6 +494,16 @@ app.post('/api/create-room', async (req, res) => {
     console.error("Erreur serveur:", error);
     res.status(500).json({ error: "Erreur interne." });
   }
+
+  await fetch(`https://api.daily.co/v1/rooms/${roomName}`, {
+    method: "DELETE",
+    headers: {
+      "Authorization": "Bearer 1dd665faed96e61789a8e982faf2ffbb6197b4c49fd6bd06394cff9b1df7ae0c"
+    }
+  });
+  
+
+
 });
 
 
