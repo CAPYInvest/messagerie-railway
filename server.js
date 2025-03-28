@@ -57,20 +57,22 @@ const io = new Server(httpServer, {
 io.on('connection', (socket) => {
   console.log('Un client est connecté à Socket.io :', socket.id);
   //-------------------------------------------------------------------------------
-  // AJOUT MESSAGERIE : Écouter l’événement "register" pour enregistrer le memberId
+  // AJOUT VISIOCONF : Écouter l’événement "register" pour enregistrer le memberId
   // DE : socket.on('register', (data) => {
   // A : console.log(`Client déconnecté : ${socket.memberId}`);
   //-------------------------------------------------------------------------------
-  socket.on('register', (data) => {
+   // Écoute de l'enregistrement du memberId
+   socket.on('register', (data) => {
     if (data && data.memberId) {
       connectedClients[data.memberId] = socket.id;
       socket.memberId = data.memberId;
       console.log(`Client enregistré : ${data.memberId} => ${socket.id}`);
+      console.log("connectedClients =", connectedClients); // Pour vérification
     }
   });
+
   // Relai de l'invitation d'appel vers le destinataire
   socket.on('callInvitation', (data) => {
-    // data attendu : { from, to, roomUrl, type }
     const recipientSocketId = connectedClients[data.to];
     if (recipientSocketId) {
       io.to(recipientSocketId).emit('incomingCall', data);
@@ -80,7 +82,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // À la déconnexion, on retire le client de la map
+  // À la déconnexion, retirer le client
   socket.on('disconnect', () => {
     if (socket.memberId) {
       delete connectedClients[socket.memberId];
@@ -498,20 +500,6 @@ app.post('/api/create-room', async (req, res) => {
     res.status(500).json({ error: "Erreur interne." });
   }
 
-  await fetch(`https://api.daily.co/v1/rooms/${roomName}`, {
-    method: "DELETE",
-    headers: {
-      "Authorization": "Bearer 1dd665faed96e61789a8e982faf2ffbb6197b4c49fd6bd06394cff9b1df7ae0c"
-    }
-  });
-  socket.on('register', (data) => {
-    if (data && data.memberId) {
-      connectedClients[data.memberId] = socket.id;
-      socket.memberId = data.memberId;
-      console.log(`Client enregistré : ${data.memberId} => ${socket.id}`);
-      console.log("connectedClients =", connectedClients); // Ceci doit apparaître dans les logs
-    }
-  });
   
 
 
