@@ -459,6 +459,9 @@ app.delete('/api/messages/:id', async (req, res) => {
 app.post('/api/create-room', async (req, res) => {
   try {
     const { type } = req.body; // "audio" ou "video"
+
+    // Définir nowInSeconds avant de l'utiliser
+    const nowInSeconds = Math.floor(Date.now() / 1000);
     
     // Propriétés reconnues par l'API Daily
     // Ici, on coupe la vidéo au démarrage si c'est un appel audio.
@@ -468,7 +471,7 @@ app.post('/api/create-room', async (req, res) => {
         enable_chat: false,
         start_video_off: (type === "audio"),
         start_audio_off: false,
-        exp: 3600  // Expire dans 1 heure
+        exp: nowInSeconds + 3600   // Expire dans 1 heure
       }
     };
 
