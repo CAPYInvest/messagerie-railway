@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const connectedClients = {};
 
 const { initializeApp } = require('firebase/app');
 const {
@@ -55,6 +56,37 @@ const io = new Server(httpServer, {
 
 io.on('connection', (socket) => {
   console.log('Un client est connecté à Socket.io :', socket.id);
+  //-------------------------------------------------------------------------------
+  // AJOUT MESSAGERIE : Écouter l’événement "register" pour enregistrer le memberId
+  // DE : socket.on('register', (data) => {
+  // A : console.log(`Client déconnecté : ${socket.memberId}`);
+  //-------------------------------------------------------------------------------
+  socket.on('register', (data) => {
+    if (data && data.memberId) {
+      connectedClients[data.memberId] = socket.id;
+      socket.memberId = data.memberId;
+      console.log(`Client enregistré : ${data.memberId} => ${socket.id}`);
+    }
+  });
+  // Relai de l'invitation d'appel vers le destinataire
+  socket.on('callInvitation', (data) => {
+    // data attendu : { from, to, roomUrl, type }
+    const recipientSocketId = connectedClients[data.to];
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('incomingCall', data);
+      console.log(`Invitation d'appel de ${data.from} vers ${data.to} envoyée.`);
+    } else {
+      console.warn(`Le destinataire ${data.to} n'est pas connecté.`);
+    }
+  });
+
+  // À la déconnexion, on retire le client de la map
+  socket.on('disconnect', () => {
+    if (socket.memberId) {
+      delete connectedClients[socket.memberId];
+      console.log(`Client déconnecté : ${socket.memberId}`);
+    }
+  });
 });
 
 // -------------------------------------------------------------------
@@ -419,6 +451,47 @@ app.delete('/api/messages/:id', async (req, res) => {
   }
 });
 
+//---------------------------------------------------------------------
+// ROUTE 7 : VISIOCONFERENCE création de room :  /api/create-room
+// Endpoint pour créer une salle Daily
+//---------------------------------------------------------------------
+
+app.post('/api/create-room', async (req, res) => {
+  try {
+    const { type } = req.body; // type peut être "audio" ou "video"
+    // Options pour la salle Daily. Pour une salle audio, on peut désactiver la vidéo.
+    const roomOptions = {
+      properties: {
+        enable_screenshare: false,
+        enable_chat: false,
+        // Pour un appel audio, on peut désactiver la vidéo côté Daily
+        enable_video: type === "audio" ? false : true
+      }
+    };
+
+    // Appel à l'API Daily pour créer une salle
+    const response = await fetch("https://api.daily.co/v1/rooms", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer 1dd665faed96e61789a8e982faf2ffbb6197b4c49fd6bd06394cff9b1df7ae0c"
+      },
+      body: JSON.stringify(roomOptions)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error("Daily API error: ", errorData);
+      return res.status(500).json({ error: "Erreur lors de la création de la salle." });
+    }
+    const data = await response.json();
+    console.log("Salle Daily créée :", data.url);
+    return res.json(data);
+  } catch (error) {
+    console.error("Erreur serveur:", error);
+    res.status(500).json({ error: "Erreur interne." });
+  }
+});
 
 
 // 5) Lancement
