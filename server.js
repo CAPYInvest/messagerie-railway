@@ -458,18 +458,19 @@ app.delete('/api/messages/:id', async (req, res) => {
 
 app.post('/api/create-room', async (req, res) => {
   try {
-    const { type } = req.body; // type peut être "audio" ou "video"
-    // Options pour la salle Daily. Pour une salle audio, on peut désactiver la vidéo.
+    const { type } = req.body; // "audio" ou "video"
+    
+    // Propriétés reconnues par l'API Daily
+    // Ici, on coupe la vidéo au démarrage si c'est un appel audio.
     const roomOptions = {
       properties: {
         enable_screenshare: false,
         enable_chat: false,
-        // Pour un appel audio, on peut désactiver la vidéo côté Daily
-        enable_video: type === "audio" ? false : true
+        start_video_off: (type === "audio"),
+        start_audio_off: false
       }
     };
 
-    // Appel à l'API Daily pour créer une salle
     const response = await fetch("https://api.daily.co/v1/rooms", {
       method: "POST",
       headers: {
@@ -487,11 +488,13 @@ app.post('/api/create-room', async (req, res) => {
     const data = await response.json();
     console.log("Salle Daily créée :", data.url);
     return res.json(data);
+
   } catch (error) {
     console.error("Erreur serveur:", error);
     res.status(500).json({ error: "Erreur interne." });
   }
 });
+
 
 
 // 5) Lancement
