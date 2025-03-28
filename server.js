@@ -4,6 +4,7 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 const connectedClients = {};
+const fetch = require('node-fetch');
 
 const { initializeApp } = require('firebase/app');
 const {
