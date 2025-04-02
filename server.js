@@ -499,13 +499,84 @@ app.post('/api/create-room', async (req, res) => {
     console.error("Erreur serveur:", error);
     res.status(500).json({ error: "Erreur interne." });
   }
-
-  
-
-
 });
 
+// -------------------------------------------------------------------
+// ROUTE 8 : Gestion des fichiers partagés
+// -------------------------------------------------------------------
 
+// ROUTE 8.1 : POST /api/files (ajout d’un fichier)
+app.post('/api/files', async (req, res) => {
+  try {
+    const { senderId, receiverId, fileUrl, fileName, fileType, fileSize } = req.body;
+    if (!senderId || !receiverId || !fileUrl) {
+      return res.status(400).json({ error: 'Les champs senderId, receiverId et fileUrl sont requis' });
+    }
+    const docRef = await addDoc(collection(db, "sharedFiles"), {
+      senderId,
+      receiverId,
+      fileUrl,
+      fileName: fileName || "fichier_sans_nom",
+      fileType: fileType || "application/octet-stream",
+      fileSize: fileSize || 0,
+      uploadedAt: new Date()
+    });
+    console.log('Nouveau fichier ajouté :', docRef.id);
+    // Émettre un événement en temps réel pour notifier les clients
+    io.emit('newFile', {
+      id: docRef.id,
+      senderId,
+      receiverId,
+      fileUrl,
+      fileName,
+      fileType,
+      fileSize,
+      uploadedAt: new Date().toISOString()
+    });
+    return res.json({ success: true, message: 'Fichier enregistré', id: docRef.id });
+  } catch (err) {
+    console.error("Erreur lors de l'ajout du fichier :", err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
+// ROUTE 8.2 : GET /api/files?senderId=xxx&recipientId=yyy (récupération des fichiers)
+app.get('/api/files', async (req, res) => {
+  try {
+    const { senderId, recipientId } = req.query;
+    if (!senderId || !recipientId) {
+      return res.status(400).json({ error: 'Paramètres senderId et recipientId requis' });
+    }
+    const filesCollection = collection(db, 'sharedFiles');
+    // Requête A : fichiers envoyés de senderId vers recipientId
+    const q1 = query(
+      filesCollection,
+      where('senderId', '==', senderId),
+      where('receiverId', '==', recipientId)
+    );
+    // Requête B : fichiers envoyés de recipientId vers senderId
+    const q2 = query(
+      filesCollection,
+      where('senderId', '==', recipientId),
+      where('receiverId', '==', senderId)
+    );
+    let results = [];
+    const snapshotA = await getDocs(q1);
+    snapshotA.forEach(doc => {
+      results.push({ id: doc.id, ...doc.data() });
+    });
+    const snapshotB = await getDocs(q2);
+    snapshotB.forEach(doc => {
+      results.push({ id: doc.id, ...doc.data() });
+    });
+    // Tri par date d'upload (du plus ancien au plus récent)
+    results.sort((a, b) => new Date(a.uploadedAt) - new Date(b.uploadedAt));
+    return res.json(results);
+  } catch (err) {
+    console.error('Erreur lors de la récupération des fichiers :', err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
 
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
