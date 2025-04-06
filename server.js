@@ -1,4 +1,6 @@
 // server.js
+
+// ============ Partie Messagerie ============
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
@@ -21,7 +23,7 @@ const {
 
 // 1) Config Firebase
 const firebaseConfig = {
-  apiKey: "xxx",
+  apiKey: "AIzaSyAZlyFn_umf-L_9XWgBXANVpfP3Qd_pYPE",
   authDomain: "capy-invest.firebaseapp.com",
   databaseURL: "https://capy-invest-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "capy-invest",
@@ -501,80 +503,139 @@ app.post('/api/create-room', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------------
-// ROUTE 8 : Gestion des fichiers partagés
-// -------------------------------------------------------------------
 
-// ROUTE 8.1 : POST /api/files (ajout d’un fichier)
-app.post('/api/files', async (req, res) => {
+
+
+
+
+
+
+// ============ Partie Stockage de fichiers (nouvelle fonctionnalité) ============
+
+
+
+
+
+
+
+
+// Utilisation de firebase-admin et multer pour des opérations sécurisées sur Firebase Storage
+const admin = require('firebase-admin');
+const multer = require('multer');
+
+// Récupérer le JSON stocké dans la variable d'environnement
+const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+
+// Convertir la chaîne JSON en objet
+const serviceAccount = JSON.parse(serviceAccountJson);
+
+// Initialiser firebase-admin avec les informations d'authentification et le bucket
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: "capy-invest.firebasestorage.app"
+});
+const bucket = admin.storage().bucket();
+
+// Configuration de multer pour stocker les fichiers en mémoire
+const upload = multer({ storage: multer.memoryStorage() });
+
+
+
+//---------------------------------------------------------------------
+// ROUTE 8 : Gestionnaire de fichier : Upload /api/upload-file...
+//---------------------------------------------------------------------
+
+// Endpoint pour uploader un fichier
+app.post('/api/upload-file', upload.single('file'), async (req, res) => {
   try {
-    const { senderId, receiverId, fileUrl, fileName, fileType, fileSize } = req.body;
-    if (!senderId || !receiverId || !fileUrl) {
-      return res.status(400).json({ error: 'Les champs senderId, receiverId et fileUrl sont requis' });
+    if (!req.file) {
+      return res.status(400).json({ error: "Aucun fichier fourni." });
     }
-    const docRef = await addDoc(collection(db, "sharedFiles"), {
-      senderId,
-      receiverId,
-      fileUrl,
-      fileName: fileName || "fichier_sans_nom",
-      fileType: fileType || "application/octet-stream",
-      fileSize: fileSize || 0,
-      uploadedAt: new Date()
+    // Les IDs d'utilisateur sont envoyés dans le corps de la requête
+    const { senderId, receiverId } = req.body;
+    if (!senderId || !receiverId) {
+      return res.status(400).json({ error: "Les champs senderId et receiverId sont requis." });
+    }
+    const timestamp = Date.now();
+    const originalName = req.file.originalname;
+    const filePath = `uploads/${senderId}_${timestamp}_${originalName}`;
+    const fileUpload = bucket.file(filePath);
+    
+    const blobStream = fileUpload.createWriteStream({
+      metadata: {
+        contentType: req.file.mimetype
+      }
     });
-    console.log('Nouveau fichier ajouté :', docRef.id);
-    // Émettre un événement en temps réel pour notifier les clients
-    io.emit('newFile', {
-      id: docRef.id,
-      senderId,
-      receiverId,
-      fileUrl,
-      fileName,
-      fileType,
-      fileSize,
-      uploadedAt: new Date().toISOString()
+    
+    blobStream.on('error', (err) => {
+      console.error("Erreur lors de l'upload vers Storage :", err);
+      return res.status(500).json({ error: err.message });
     });
-    return res.json({ success: true, message: 'Fichier enregistré', id: docRef.id });
-  } catch (err) {
-    console.error("Erreur lors de l'ajout du fichier :", err);
-    return res.status(500).json({ error: 'Erreur interne' });
+    
+    blobStream.on('finish', async () => {
+      // Rendre le fichier public (optionnel, mais souvent nécessaire pour un accès direct)
+      await fileUpload.makePublic();
+      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileUpload.name}`;
+      
+      // Enregistrer les métadonnées dans Firestore, dans la collection "sharedFiles"
+      const fileDoc = await addDoc(collection(db, 'sharedFiles'), {
+        senderId,
+        receiverId,
+        fileUrl: publicUrl,
+        fileName: originalName,
+        fileType: req.file.mimetype,
+        fileSize: req.file.size,
+        uploadedAt: new Date()
+      });
+      
+      // Émettre un événement Socket.io pour mettre à jour les clients en temps réel
+      io.emit('newFile', {
+        id: fileDoc.id,
+        senderId,
+        receiverId,
+        fileUrl: publicUrl,
+        fileName: originalName,
+        fileType: req.file.mimetype,
+        fileSize: req.file.size,
+        uploadedAt: new Date().toISOString()
+      });
+      
+      return res.json({ success: true, fileUrl: publicUrl, fileId: fileDoc.id });
+    });
+    
+    blobStream.end(req.file.buffer);
+  } catch (error) {
+    console.error("Erreur dans /api/upload-file :", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ROUTE 8.2 : GET /api/files?senderId=xxx&recipientId=yyy (récupération des fichiers)
+
+//---------------------------------------------------------------------
+// ROUTE 9 : Gestionnaire de fichier : récupérer la liste des fichiers échangés /api/files...
+//---------------------------------------------------------------------
+
+// Endpoint pour récupérer la liste des fichiers échangés entre deux utilisateurs
 app.get('/api/files', async (req, res) => {
   try {
     const { senderId, recipientId } = req.query;
     if (!senderId || !recipientId) {
-      return res.status(400).json({ error: 'Paramètres senderId et recipientId requis' });
+      return res.status(400).json({ error: 'Les paramètres senderId et recipientId sont requis.' });
     }
     const filesCollection = collection(db, 'sharedFiles');
-    // Requête A : fichiers envoyés de senderId vers recipientId
-    const q1 = query(
-      filesCollection,
-      where('senderId', '==', senderId),
-      where('receiverId', '==', recipientId)
-    );
-    // Requête B : fichiers envoyés de recipientId vers senderId
-    const q2 = query(
-      filesCollection,
-      where('senderId', '==', recipientId),
-      where('receiverId', '==', senderId)
-    );
+    const q1 = query(filesCollection, where('senderId', '==', senderId), where('receiverId', '==', recipientId));
+    const q2 = query(filesCollection, where('senderId', '==', recipientId), where('receiverId', '==', senderId));
     let results = [];
-    const snapshotA = await getDocs(q1);
-    snapshotA.forEach(doc => {
-      results.push({ id: doc.id, ...doc.data() });
-    });
-    const snapshotB = await getDocs(q2);
-    snapshotB.forEach(doc => {
-      results.push({ id: doc.id, ...doc.data() });
-    });
+    const snapshot1 = await getDocs(q1);
+    snapshot1.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+    const snapshot2 = await getDocs(q2);
+    snapshot2.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
     // Tri par date d'upload (du plus ancien au plus récent)
     results.sort((a, b) => new Date(a.uploadedAt) - new Date(b.uploadedAt));
     return res.json(results);
-  } catch (err) {
-    console.error('Erreur lors de la récupération des fichiers :', err);
-    return res.status(500).json({ error: 'Erreur interne' });
+  } catch (error) {
+    console.error("Erreur dans /api/files :", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
