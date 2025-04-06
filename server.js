@@ -523,12 +523,11 @@ app.post('/api/create-room', async (req, res) => {
 const admin = require('firebase-admin');
 const multer = require('multer');
 
-// Récupérer le JSON stocké dans la variable d'environnement
 const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-console.log(process.env.FIREBASE_SERVICE_ACCOUNT)
-
-// Convertir la chaîne JSON en objet
 const serviceAccount = JSON.parse(serviceAccountJson);
+
+// Remplacer les séquences littérales "\\n" par de vrais retours à la ligne
+serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
 // Initialiser firebase-admin avec les informations d'authentification et le bucket
 admin.initializeApp({
