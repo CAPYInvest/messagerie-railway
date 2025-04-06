@@ -4,7 +4,8 @@
     "description": "Test de messagerie simple via Railway",
     "main": "server.js",
     "scripts": {
-        "start": "node server.js"
+        "start": "node server.js",
+        "build": "echo \"No build step necessary\""
     },
     "dependencies": {
         "cors": "^2.8.5",
