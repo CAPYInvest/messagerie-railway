@@ -525,6 +525,7 @@ const multer = require('multer');
 
 // Récupérer le JSON stocké dans la variable d'environnement
 const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+console.log(process.env.FIREBASE_SERVICE_ACCOUNT)
 
 // Convertir la chaîne JSON en objet
 const serviceAccount = JSON.parse(serviceAccountJson);
