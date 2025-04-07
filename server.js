@@ -586,7 +586,8 @@ app.post('/api/upload-file', upload.single('file'), async (req, res) => {
         fileName: originalName,
         fileType: req.file.mimetype,
         fileSize: req.file.size,
-        uploadedAt: new Date()
+        uploadedAt: new Date(),
+        deleted: false  
       });
       
       // Émettre un événement Socket.io pour mettre à jour les clients en temps réel
