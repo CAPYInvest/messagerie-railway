@@ -524,6 +524,7 @@ const admin = require('firebase-admin');
 const multer = require('multer');
 
 const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+console.log("FIREBASE_SERVICE_ACCOUNT =>", process.env.FIREBASE_SERVICE_ACCOUNT);
 const serviceAccount = JSON.parse(serviceAccountJson);
 
 // Remplacer les séquences littérales "\\n" par de vrais retours à la ligne
@@ -623,14 +624,27 @@ app.get('/api/files', async (req, res) => {
       return res.status(400).json({ error: 'Les paramètres senderId et recipientId sont requis.' });
     }
     const filesCollection = collection(db, 'sharedFiles');
-    const q1 = query(filesCollection, where('senderId', '==', senderId), where('receiverId', '==', recipientId));
-    const q2 = query(filesCollection, where('senderId', '==', recipientId), where('receiverId', '==', senderId));
+    
+    // Supposons que vous ajoutez un champ "deleted" lors de la suppression, et qu'il vaut false par défaut.
+    const q1 = query(
+      filesCollection,
+      where('senderId', '==', senderId),
+      where('receiverId', '==', recipientId),
+      where('deleted', '==', false)
+    );
+    const q2 = query(
+      filesCollection,
+      where('senderId', '==', recipientId),
+      where('receiverId', '==', senderId),
+      where('deleted', '==', false)
+    );
+    
     let results = [];
     const snapshot1 = await getDocs(q1);
     snapshot1.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
     const snapshot2 = await getDocs(q2);
     snapshot2.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
-    // Tri par date d'upload (du plus ancien au plus récent)
+    
     results.sort((a, b) => new Date(a.uploadedAt) - new Date(b.uploadedAt));
     return res.json(results);
   } catch (error) {
@@ -638,6 +652,7 @@ app.get('/api/files', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
