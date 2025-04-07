@@ -655,6 +655,52 @@ app.get('/api/files', async (req, res) => {
 });
 
 
+//---------------------------------------------------------------------
+// ROUTE 10 : Gestionnaire de fichier : suppression des fichiers /api/files...
+//---------------------------------------------------------------------
+
+// Endpoint pour supprimer un fichier (via son ID Firestore)
+app.delete('/api/files/:id', async (req, res) => {
+  try {
+    const fileId = req.params.id;
+    if (!fileId) {
+      return res.status(400).json({ error: "L'ID du fichier est requis." });
+    }
+    
+    // Récupérer le document Firestore correspondant
+    const fileDocRef = doc(db, 'sharedFiles', fileId);
+    const fileDocSnap = await getDoc(fileDocRef);
+    if (!fileDocSnap.exists()) {
+      return res.status(404).json({ error: "Document introuvable." });
+    }
+    const fileData = fileDocSnap.data();
+    
+    // Supprimer le fichier de Storage
+    // On suppose que le champ fileUrl contient l'URL du fichier dans Storage
+    // Pour obtenir le chemin, vous pouvez extraire la partie après le bucket, par exemple :
+    const filePath = fileData.fileUrl.split(`https://storage.googleapis.com/${bucket.name}/`)[1];
+    if (filePath) {
+      await bucket.file(filePath).delete();
+      console.log("Fichier supprimé du Storage :", filePath);
+    }
+    
+    // Mettre à jour le document Firestore pour marquer le fichier comme supprimé
+    await updateDoc(fileDocRef, { deleted: true });
+    
+    // Émettre un événement Socket.io pour actualiser la liste côté client
+    io.emit('newFile', { deleted: true, id: fileId });
+    
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Erreur lors de la suppression du fichier :", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+
+
+
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
