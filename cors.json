@@ -1,0 +1,9 @@
+[
+    {
+      "origin": ["https://capy-invest-fr.webflow.io"],
+      "method": ["GET", "HEAD"],
+      "responseHeader": ["Content-Type"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+  
