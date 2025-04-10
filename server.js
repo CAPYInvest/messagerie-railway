@@ -1,4 +1,4 @@
-// server.js
+Firestore// server.js
 
 // ============ Partie Constante ============
 require('dotenv').config();
@@ -121,7 +121,7 @@ app.post('/api/messages', requireAuth, async (req, res) => {
     const safeMessage = sanitizeString(message);
 
     // Ajout dans Firestore avec read: false
-    const docRef = await addDoc(collection(db, 'messages'), {
+    const docRef = await addDoc(db.collection('messages'), {
       message,
       senderId,
       receiverId,
@@ -160,7 +160,8 @@ app.get('/api/messages', requireAuth, async (req, res) => {
     const userId = senderId;    // L'utilisateur courant
     const otherId = recipientId; // L'autre personne
 
-    const messagesCollection = collection(db, 'messages');
+    const messagesCollection = db.collection('messages');
+
 
     // Query A : userId -> otherId
     const q1 = query(
@@ -223,7 +224,7 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
     // On va récupérer tous les messages où userId est sender OU receiver
     // Comme Firestore ne gère pas le OR direct sur deux champs,
     // on fait deux requêtes et on fusionne.
-    const messagesColl = collection(db, 'messages');
+    const messagesColl = db.collection('messages');
 
     const qA = query(messagesColl, where('senderId', '==', userId));
     const qB = query(messagesColl, where('receiverId', '==', userId));
@@ -294,7 +295,7 @@ app.get('/api/unread', requireAuth, async (req, res) => {
     }
 
     // 1) Récupérer tous les messages "read = false" où receiverId = userId
-    const messagesRef = collection(db, 'messages');
+    const messagesRef = db.collection('messages');
     const q = query(
       messagesRef,
       where('receiverId', '==', userId),
@@ -563,7 +564,7 @@ app.post('/api/upload-file', requireAuth, upload.single('file'), async (req, res
       const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileUpload.name}`;
       
       // Enregistrer les métadonnées dans Firestore, dans la collection "sharedFiles"
-      const fileDoc = await addDoc(collection(db, 'sharedFiles'), {
+      const fileDoc = await addDoc(db.collection('sharedFiles'), {
         senderId,
         receiverId,
         fileUrl: publicUrl,
@@ -608,7 +609,7 @@ app.get('/api/files', requireAuth, async (req, res) => {
     if (!senderId || !recipientId) {
       return res.status(400).json({ error: 'Les paramètres senderId et recipientId sont requis.' });
     }
-    const filesCollection = collection(db, 'sharedFiles');
+    const filesCollection = db.collection('sharedFiles');
     
     // Supposons que vous ajoutez un champ "deleted" lors de la suppression, et qu'il vaut false par défaut.
     const q1 = query(
