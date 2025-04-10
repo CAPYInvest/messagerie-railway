@@ -10,7 +10,7 @@ const connectedClients = {};
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 // Importez le middleware d'authentification depuis middlewareauth.js et routes
-const { requireAuth } = require('.middlewareauth');
+const { requireAuth } = require('./middlewareauth');
 const authRoutes = require('./routesauth');
 const router = express.Router();
 const app = express();
