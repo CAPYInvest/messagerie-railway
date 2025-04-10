@@ -107,6 +107,32 @@ function sanitizeString(str) {
     .replace(/'/g, '&#39;'); // échappe aussi l'apostrophe
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ----------------------------------------------
 // ROUTE 1 : POST /api/messages (ajout d’un message)
 // ----------------------------------------------
@@ -120,18 +146,18 @@ app.post('/api/messages', requireAuth, async (req, res) => {
     // Échapper le contenu du message pour éviter le code HTML malveillant
     const safeMessage = sanitizeString(message);
 
-    // Ajout dans Firestore avec read: false
-    const docRef = await addDoc(db.collection('messages'), {
+    // Ajout dans Firestore via l'Admin SDK : utilisez .add() sur la collection 'messages'
+    const docRef = await db.collection('messages').add({
       message,
       senderId,
       receiverId,
       timestamp: new Date(),
-      read: false   // <-- Important
+      read: false // Marque le message comme non lu
     });
 
     console.log('Nouveau message ajouté :', docRef.id);
 
-    // Émettre un événement temps réel si vous utilisez Socket.io
+    // Émettre un événement temps réel via Socket.io
     io.emit('newMessage', {
       id: docRef.id,
       message: safeMessage,
@@ -142,10 +168,11 @@ app.post('/api/messages', requireAuth, async (req, res) => {
 
     return res.json({ success: true, message: 'Message enregistré', id: docRef.id });
   } catch (error) {
-    console.error('Erreur lors de l\'ajout du message :', error);
+    console.error('Erreur lors de l’ajout du message :', error);
     return res.status(500).json({ error: 'Erreur interne' });
   }
 });
+
 
 // ----------------------------------------------
 // ROUTE 2 : GET /api/messages?senderId=xxx&recipientId=yyy
@@ -323,24 +350,24 @@ app.get('/api/unread', requireAuth, async (req, res) => {
 
 
 
-//---------------------------------------------------------------------
+// ---------------------------------------------------------------------
 // ROUTE 5 : PUT /api/messages/:id
 // Permet de modifier un message existant si on est l’expéditeur
-//---------------------------------------------------------------------
+// ---------------------------------------------------------------------
 app.put('/api/messages/:id', requireAuth, async (req, res) => {
   try {
     const messageId = req.params.id;
     const { userId, newContent } = req.body; 
-    // userId = l'utilisateur courant, newContent = nouveau texte du message
+    // userId représente l'utilisateur courant, newContent le nouveau texte du message
 
     if (!messageId || !userId || !newContent) {
       return res.status(400).json({ error: 'Données manquantes (messageId, userId, newContent)' });
     }
 
-    // On récupère le document Firestore
-    const docRef = doc(db, 'messages', messageId);
-    const docSnap = await getDoc(docRef);
-    if (!docSnap.exists()) {
+    // Utiliser l'Admin SDK pour obtenir le document Firestore
+    const docRef = db.collection('messages').doc(messageId);
+    const docSnap = await docRef.get();
+    if (!docSnap.exists) {
       return res.status(404).json({ error: 'Message introuvable' });
     }
 
@@ -350,24 +377,24 @@ app.put('/api/messages/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
 
-    // Sanitize pour éviter XSS
+    // Échapper le contenu pour éviter le XSS
     const safeContent = sanitizeString(newContent);
 
-    // Mise à jour dans Firestore
-    await updateDoc(docRef, {
+    // Mise à jour du document via l'Admin SDK
+    await docRef.update({
       message: safeContent,
       edited: true
     });
 
     console.log(`Message ${messageId} modifié par ${userId}`);
 
-    // Émettre un événement Socket.io => tous les clients peuvent se mettre à jour
+    // Émettre un événement Socket.io pour mettre à jour les clients en temps réel
     io.emit('messageUpdated', {
       id: messageId,
       senderId: messageData.senderId,
       receiverId: messageData.receiverId,
       newContent: safeContent,
-      edited: true    // <-- on signale que c'est édité
+      edited: true
     });
 
     return res.json({ success: true });
@@ -376,6 +403,7 @@ app.put('/api/messages/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Erreur interne' });
   }
 });
+
 
 //---------------------------------------------------------------------
 // ROUTE 6 : DELETE /api/messages/:id
