@@ -110,7 +110,44 @@ function sanitizeString(str) {
 
 
 
+// ------------------------------------------------
+// Fonctions utilitaires
+//-----------------------------------------------
 
+
+// --- Fonctions utilitaires pour le timestamp ---
+
+// Cette fonction convertit un timestamp Firestore (ou une autre valeur) en millisecondes
+function getTimeValue(ts) {
+  if (!ts) {
+    console.warn("Aucun timestamp fourni, on retourne 0");
+    return 0;
+  }
+  // Si c'est un objet Firestore Timestamp qui fournit une méthode toDate()
+  if (typeof ts.toDate === 'function') {
+    return ts.toDate().getTime();
+  }
+  // Si ts est un objet avec des propriétés seconds et nanoseconds
+  if (typeof ts === 'object' && ts.seconds !== undefined && ts.nanoseconds !== undefined) {
+    return ts.seconds * 1000 + Math.floor(ts.nanoseconds / 1e6);
+  }
+  // Sinon, on essaie de convertir directement en nombre
+  const dateObj = new Date(ts);
+  if (isNaN(dateObj.getTime())) {
+    console.warn("Timestamp invalide :", ts);
+    return 0;
+  }
+  return dateObj.getTime();
+}
+
+// Cette fonction formate le timestamp en une chaîne lisible (HH:MM:SS)
+function formatTime(ts) {
+  const d = new Date(getTimeValue(ts));
+  const hh = d.getHours().toString().padStart(2, '0');
+  const mm = d.getMinutes().toString().padStart(2, '0');
+  const ss = d.getSeconds().toString().padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
 
 
 
@@ -257,30 +294,13 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
     if (allMessages.length === 0) {
       return res.json(null);
     }
-
-    // Fonction pour extraire la valeur en millisecondes d'un timestamp
-    function getTimeValue(ts) {
-      if (!ts) {
-        console.warn("Aucun timestamp fourni, on retourne 0");
-        return 0;
-      }
-      if (typeof ts === 'object' && ts.seconds !== undefined && ts.nanoseconds !== undefined) {
-        return ts.seconds * 1000 + Math.floor(ts.nanoseconds / 1e6);
-      }
-      const dateObj = new Date(ts);
-      if (isNaN(dateObj.getTime())) {
-        console.warn("Timestamp invalide :", ts);
-        return 0;
-      }
-      return dateObj.getTime();
-    }
     
     // Trier les messages par date décroissante (le plus récent en premier)
     allMessages.sort((a, b) => getTimeValue(b.timestamp) - getTimeValue(a.timestamp));
     
-    console.log("Après tri (du plus récent au plus ancien) :");
+    // Afficher le timestamp formaté dans la console pour vérification
     allMessages.forEach(m => {
-      console.log(`messageID=${m.id}, sender=${m.senderId}, receiver=${m.receiverId}, timestamp=${m.timestamp}`);
+    console.log(`MessageID=${m.id}, timestamp=${formatTime(m.timestamp)}`);
     });
     
     const lastMsg = allMessages[0];
@@ -290,6 +310,8 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
     console.error('Erreur /api/last-message :', error);
     return res.status(500).json({ error: 'Erreur interne' });
   }
+
+
 });
 
 
