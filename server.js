@@ -11,7 +11,7 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const { verifyMemberstackToken } = require('./middleware/auth');
 const router = express.Router();
-
+const app = express();
 
 
 //Import route token
@@ -50,7 +50,6 @@ const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 
 // 3) Express + Socket.io
-const app = express();
 app.use(cors({
   origin: 'https://capy-invest-fr.webflow.io',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
