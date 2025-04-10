@@ -296,17 +296,15 @@ app.get('/api/unread', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Paramètre userId requis' });
     }
 
-    // 1) Récupérer tous les messages "read = false" où receiverId = userId
+    // Utilisez la collection "messages" du Admin SDK
     const messagesRef = db.collection('messages');
-    const q = query(
-      messagesRef,
-      where('receiverId', '==', userId),
-      where('read', '==', false)
-    );
-    const snapshot = await getDocs(q);
+    // Récupérer les messages non lus (read == false) où receiverId est égal à userId
+    const snapshot = await messagesRef
+      .where('receiverId', '==', userId)
+      .where('read', '==', false)
+      .get();
 
-    // 2) Regrouper par senderId
-    //    On construit un map : { [senderId]: { unreadCount, lastMessageTime } }
+    // Construction d'un map regroupant par senderId
     const map = new Map();
 
     snapshot.forEach(doc => {
@@ -320,99 +318,102 @@ app.get('/api/unread', requireAuth, async (req, res) => {
         });
       }
       const obj = map.get(sender);
-
-      // Incrémenter le nombre de non-lus
       obj.unreadCount++;
 
-      // Gérer la date du dernier message
-      // On convertit data.timestamp (Date ou Firestore Timestamp) en nombre (ms)
       let ts = 0;
-      if (data.timestamp && data.timestamp.toMillis) {
-        // Firestore Timestamp
-        ts = data.timestamp.toMillis();
+      if (data.timestamp && data.timestamp.seconds !== undefined) {
+        ts = data.timestamp.seconds * 1000 + Math.floor(data.timestamp.nanoseconds / 1e6);
       } else {
-        // Date JS ou string
         ts = new Date(data.timestamp).getTime();
       }
-      // Mettre à jour si c'est plus récent
       if (ts > obj.lastMessageTime) {
         obj.lastMessageTime = ts;
       }
     });
 
-    // 3) Transformer le map en tableau
-    //    ex: [ { contactId, unreadCount, lastMessageTime: "2025-03-27T14:05:00.000Z" }, ... ]
+    // Transformer le map en tableau
     const result = Array.from(map.values()).map(item => {
       return {
         contactId: item.contactId,
         unreadCount: item.unreadCount,
-        // Convertir le nombre (ms) en ISO string
         lastMessageTime: new Date(item.lastMessageTime).toISOString()
       };
     });
 
-    // 4) Retourner le tableau
     return res.json(result);
-
   } catch (err) {
     console.error('Erreur /api/unread :', err);
     return res.status(500).json({ error: 'Erreur interne' });
   }
 });
 
+
 //---------------------------------------------------------------------
 // ROUTE 5 : PUT /api/messages/:id
 // Permet de modifier un message existant si on est l’expéditeur
 //---------------------------------------------------------------------
-app.put('/api/messages/:id', requireAuth, async (req, res) => {
+app.get('/api/last-message', requireAuth, async (req, res) => {
   try {
-    const messageId = req.params.id;
-    const { userId, newContent } = req.body; 
-    // userId = l'utilisateur courant, newContent = nouveau texte du message
-
-    if (!messageId || !userId || !newContent) {
-      return res.status(400).json({ error: 'Données manquantes (messageId, userId, newContent)' });
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: 'Paramètre userId requis' });
     }
 
-    // On récupère le document Firestore
-    const docRef = doc(db, 'messages', messageId);
-    const docSnap = await getDoc(docRef);
-    if (!docSnap.exists()) {
-      return res.status(404).json({ error: 'Message introuvable' });
-    }
+    // Utilisez le Admin SDK pour accéder à la collection "messages"
+    const messagesColl = db.collection('messages');
 
-    const messageData = docSnap.data();
-    // Vérification : seul l’expéditeur peut modifier
-    if (messageData.senderId !== userId) {
-      return res.status(403).json({ error: 'Action non autorisée' });
-    }
+    // Récupérer les messages où l'utilisateur est l'expéditeur
+    const snapshotA = await messagesColl
+      .where('senderId', '==', userId)
+      .get();
 
-    // Sanitize pour éviter XSS
-    const safeContent = sanitizeString(newContent);
+    // Récupérer les messages où l'utilisateur est le destinataire
+    const snapshotB = await messagesColl
+      .where('receiverId', '==', userId)
+      .get();
 
-    // Mise à jour dans Firestore
-    await updateDoc(docRef, {
-      message: safeContent,
-      edited: true
+    let allMessages = [];
+
+    snapshotA.forEach(doc => {
+      allMessages.push({ id: doc.id, ...doc.data() });
+    });
+    snapshotB.forEach(doc => {
+      allMessages.push({ id: doc.id, ...doc.data() });
     });
 
-    console.log(`Message ${messageId} modifié par ${userId}`);
+    if (allMessages.length === 0) {
+      return res.json(null);
+    }
 
-    // Émettre un événement Socket.io => tous les clients peuvent se mettre à jour
-    io.emit('messageUpdated', {
-      id: messageId,
-      senderId: messageData.senderId,
-      receiverId: messageData.receiverId,
-      newContent: safeContent,
-      edited: true    // <-- on signale que c'est édité
+    // Fonction utilitaire pour extraire la valeur en millisecondes d'un timestamp
+    function getTimeValue(ts) {
+      // Si c'est un Firestore Timestamp
+      if (ts && ts.seconds !== undefined) {
+        return ts.seconds * 1000 + Math.floor(ts.nanoseconds / 1e6);
+      }
+      // Sinon, s'il s'agit d'une date JS ou d'une chaîne
+      return new Date(ts).getTime();
+    }
+
+    // Tri des messages par date décroissante (le plus récent en premier)
+    allMessages.sort((a, b) => {
+      return getTimeValue(b.timestamp) - getTimeValue(a.timestamp);
     });
 
-    return res.json({ success: true });
-  } catch (err) {
-    console.error('Erreur lors de la modification du message :', err);
-    res.status(500).json({ error: 'Erreur interne' });
+    console.log("Après tri (du plus récent au plus ancien) :");
+    allMessages.forEach(m => {
+      console.log(`messageID=${m.id}, sender=${m.senderId}, receiver=${m.receiverId}, timestamp=${m.timestamp}`);
+    });
+
+    const lastMsg = allMessages[0];
+    console.log("Le plus récent message est :", lastMsg);
+    return res.json(lastMsg);
+  } catch (error) {
+    console.error('Erreur /api/last-message :', error);
+    return res.status(500).json({ error: 'Erreur interne' });
   }
 });
+
 
 //---------------------------------------------------------------------
 // ROUTE 6 : DELETE /api/messages/:id
