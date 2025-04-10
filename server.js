@@ -529,7 +529,7 @@ app.post('/api/upload-file', requireAuth, upload.single('file'), async (req, res
       const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileUpload.name}`;
       
       // Enregistrer les métadonnées dans Firestore, dans la collection "sharedFiles"
-      const fileDoc = await addDoc(db.collection('sharedFiles'), {
+      const fileDoc = await db.collection('sharedFiles').add({
         senderId,
         receiverId,
         fileUrl: publicUrl,
@@ -622,6 +622,7 @@ app.get('/api/files', requireAuth, async (req, res) => {
 //---------------------------------------------------------------------
 
 // Endpoint pour supprimer un fichier (via son ID Firestore)
+// Endpoint pour supprimer un fichier (via son ID Firestore)
 app.delete('/api/files/:id', requireAuth, async (req, res) => {
   try {
     const fileId = req.params.id;
@@ -630,16 +631,15 @@ app.delete('/api/files/:id', requireAuth, async (req, res) => {
     }
     
     // Récupérer le document Firestore correspondant
-    const fileDocRef = doc(db, 'sharedFiles', fileId);
-    const fileDocSnap = await getDoc(fileDocRef);
-    if (!fileDocSnap.exists()) {
+    const fileDocRef = db.collection('sharedFiles').doc(fileId);
+    const fileDocSnap = await fileDocRef.get();
+    if (!fileDocSnap.exists) {
       return res.status(404).json({ error: "Document introuvable." });
     }
     const fileData = fileDocSnap.data();
     
     // Supprimer le fichier de Storage
-    // On suppose que le champ fileUrl contient l'URL du fichier dans Storage
-    // Pour obtenir le chemin, vous pouvez extraire la partie après le bucket, par exemple :
+    // Extraction du chemin à partir de l'URL du fichier
     const filePath = fileData.fileUrl.split(`https://storage.googleapis.com/${bucket.name}/`)[1];
     if (filePath) {
       await bucket.file(filePath).delete();
@@ -647,9 +647,9 @@ app.delete('/api/files/:id', requireAuth, async (req, res) => {
     }
     
     // Mettre à jour le document Firestore pour marquer le fichier comme supprimé
-    await updateDoc(fileDocRef, { deleted: true });
+    await fileDocRef.update({ deleted: true });
     
-    // Émettre un événement Socket.io pour actualiser la liste côté client
+    // Émettre un événement Socket.io pour actualiser l'affichage côté client
     io.emit('newFile', { deleted: true, id: fileId });
     
     return res.json({ success: true });
@@ -658,6 +658,7 @@ app.delete('/api/files/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 
 
