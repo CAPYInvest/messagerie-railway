@@ -217,13 +217,7 @@ app.get('/api/messages', requireAuth, async (req, res) => {
     }
 
     // Tri par date croissante (du plus ancien au plus récent)
-    allMessages.sort((a, b) => getTimeValue(b.timestamp) - getTimeValue(a.timestamp));
-
-    
-    console.log("Après tri (du plus récent au plus ancien) :");
-allMessages.forEach(m => {
-  console.log(`messageID=${m.id}, sender=${m.senderId}, receiver=${m.receiverId}, timestamp=${m.timestamp}`);
-});
+    results.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     return res.json(results);
   } catch (error) {
@@ -266,16 +260,13 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
 
     // Fonction pour extraire la valeur en millisecondes d'un timestamp
     function getTimeValue(ts) {
-      // Si ts est null/indéfini ou falsy, on retourne 0
       if (!ts) {
         console.warn("Aucun timestamp fourni, on retourne 0");
         return 0;
       }
-      // Si c'est un objet Firestore Timestamp avec 'seconds' et 'nanoseconds'
       if (typeof ts === 'object' && ts.seconds !== undefined && ts.nanoseconds !== undefined) {
         return ts.seconds * 1000 + Math.floor(ts.nanoseconds / 1e6);
       }
-      // Sinon, on essaie de convertir en date
       const dateObj = new Date(ts);
       if (isNaN(dateObj.getTime())) {
         console.warn("Timestamp invalide :", ts);
@@ -284,6 +275,21 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
       return dateObj.getTime();
     }
     
+    // Trier les messages par date décroissante (le plus récent en premier)
+    allMessages.sort((a, b) => getTimeValue(b.timestamp) - getTimeValue(a.timestamp));
+    
+    console.log("Après tri (du plus récent au plus ancien) :");
+    allMessages.forEach(m => {
+      console.log(`messageID=${m.id}, sender=${m.senderId}, receiver=${m.receiverId}, timestamp=${m.timestamp}`);
+    });
+    
+    const lastMsg = allMessages[0];
+    console.log("Le plus récent message est :", lastMsg);
+    return res.json(lastMsg);
+  } catch (error) {
+    console.error('Erreur /api/last-message :', error);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
 });
 
 
