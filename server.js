@@ -156,64 +156,54 @@ app.get('/api/messages', requireAuth, async (req, res) => {
     if (!senderId || !recipientId) {
       return res.status(400).json({ error: 'Paramètres senderId et recipientId requis' });
     }
-    // Pour clarifier les noms :
-    const userId = senderId;    // L'utilisateur courant
-    const otherId = recipientId; // L'autre personne
+    // Ici, on considère que l'utilisateur courant est celui dont l'ID est senderId
 
+    // Accès à la collection "messages" via le Admin SDK
     const messagesCollection = db.collection('messages');
 
+    // Récupérer les messages envoyés de senderId à recipientId
+    const snapshotA = await messagesCollection
+      .where('senderId', '==', senderId)
+      .where('receiverId', '==', recipientId)
+      .get();
 
-    // Query A : userId -> otherId
-    const q1 = query(
-      messagesCollection,
-      where('senderId', '==', senderId),
-      where('receiverId', '==', recipientId)
-    );
-    // Query B : otherId -> userId
-    const q2 = query(
-      messagesCollection,
-      where('senderId', '==', recipientId),
-      where('receiverId', '==', senderId)
-    );
+    // Récupérer les messages envoyés de recipientId à senderId
+    const snapshotB = await messagesCollection
+      .where('senderId', '==', recipientId)
+      .where('receiverId', '==', senderId)
+      .get();
 
     let results = [];
-
-    // Récup A
-    const snapshotA = await getDocs(q1);
     snapshotA.forEach(doc => {
       results.push({ id: doc.id, ...doc.data() });
     });
-
-    // Récup B
-    const snapshotB = await getDocs(q2);
     snapshotB.forEach(doc => {
       results.push({ id: doc.id, ...doc.data() });
     });
 
-    // ⬇️ Marquer "lu" UNIQUEMENT si msg.receiverId === userId
+    // Marquer comme "lu" uniquement les messages où le receiver est l'utilisateur courant (senderId)
     for (const msg of results) {
-      if (!msg.read && msg.receiverId === userId) {
-        const docRef = doc(db, 'messages', msg.id);
-        await updateDoc(docRef, { read: true });
+      if (!msg.read && msg.receiverId === senderId) {
+        // On met à jour via messagesCollection.doc(id)
+        await messagesCollection.doc(msg.id).update({ read: true });
       }
-    }  
+    }
 
-    // Tri par date
+    // Tri par date croissante (du plus ancien au plus récent)
     results.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     return res.json(results);
-    
   } catch (error) {
     console.error('Erreur lors de la récupération des messages :', error);
     return res.status(500).json({ error: 'Erreur interne' });
   }
 });
 
+
 // ----------------------------------------------
 // ROUTE 3 : GET /api/last-message?userId=....
 // ----------------------------------------------
 
-// Nouvelle route : GET /api/last-message?userId=XXX
 app.get('/api/last-message', requireAuth, async (req, res) => {
   try {
     const { userId } = req.query;
@@ -221,17 +211,15 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Paramètre userId requis' });
     }
 
-    // Utiliser le Admin SDK pour accéder à la collection "messages"
+    // Utiliser l'Admin SDK pour accéder à la collection "messages"
     const messagesColl = db.collection('messages');
     
     // Récupérer les messages où l'utilisateur est l'expéditeur
     const snapshotA = await messagesColl.where('senderId', '==', userId).get();
-    
     // Récupérer les messages où l'utilisateur est le destinataire
     const snapshotB = await messagesColl.where('receiverId', '==', userId).get();
     
     let allMessages = [];
-    
     snapshotA.forEach(doc => {
       allMessages.push({ id: doc.id, ...doc.data() });
     });
@@ -242,14 +230,12 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
     if (allMessages.length === 0) {
       return res.json(null);
     }
-    
-    // Fonction utilitaire pour extraire la valeur en millisecondes d'un timestamp
+
+    // Fonction pour extraire la valeur en millisecondes d'un timestamp
     function getTimeValue(ts) {
-      // Cas d'un Firestore Timestamp
       if (ts && ts.seconds !== undefined) {
         return ts.seconds * 1000 + Math.floor(ts.nanoseconds / 1e6);
       }
-      // Sinon, s'il s'agit d'une date JavaScript ou d'une chaîne de caractères
       return new Date(ts).getTime();
     }
     
@@ -286,17 +272,16 @@ app.get('/api/unread', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Paramètre userId requis' });
     }
 
-    // Utilisez la collection "messages" du Admin SDK
+    // Accéder à la collection "messages" via le Admin SDK
     const messagesRef = db.collection('messages');
-    // Récupérer les messages non lus (read == false) où receiverId est égal à userId
+    // Récupérer les messages non lus (read == false) pour lesquels receiverId == userId
     const snapshot = await messagesRef
       .where('receiverId', '==', userId)
       .where('read', '==', false)
       .get();
 
-    // Construction d'un map regroupant par senderId
+    // Regrouper par senderId
     const map = new Map();
-
     snapshot.forEach(doc => {
       const data = doc.data();
       const sender = data.senderId;
@@ -321,14 +306,12 @@ app.get('/api/unread', requireAuth, async (req, res) => {
       }
     });
 
-    // Transformer le map en tableau
-    const result = Array.from(map.values()).map(item => {
-      return {
-        contactId: item.contactId,
-        unreadCount: item.unreadCount,
-        lastMessageTime: new Date(item.lastMessageTime).toISOString()
-      };
-    });
+    // Transformer le map en tableau de résultats
+    const result = Array.from(map.values()).map(item => ({
+      contactId: item.contactId,
+      unreadCount: item.unreadCount,
+      lastMessageTime: new Date(item.lastMessageTime).toISOString()
+    }));
 
     return res.json(result);
   } catch (err) {
@@ -336,6 +319,8 @@ app.get('/api/unread', requireAuth, async (req, res) => {
     return res.status(500).json({ error: 'Erreur interne' });
   }
 });
+
+
 
 
 //---------------------------------------------------------------------
