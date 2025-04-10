@@ -574,33 +574,45 @@ app.get('/api/files', requireAuth, async (req, res) => {
     if (!senderId || !recipientId) {
       return res.status(400).json({ error: 'Les paramètres senderId et recipientId sont requis.' });
     }
+
+    // Accès via l’Admin SDK
     const filesCollection = db.collection('sharedFiles');
     
-    // Supposons que vous ajoutez un champ "deleted" lors de la suppression, et qu'il vaut false par défaut.
-    const q1 = query(
-      filesCollection,
-      where('senderId', '==', senderId),
-      where('receiverId', '==', recipientId),
-      where('deleted', '==', false)
-    );
-    const q2 = query(
-      filesCollection,
-      where('senderId', '==', recipientId),
-      where('receiverId', '==', senderId),
-      where('deleted', '==', false)
-    );
-    
+    // Requête 1 : senderId -> recipientId
+    const snapshot1 = await filesCollection
+      .where('senderId', '==', senderId)
+      .where('receiverId', '==', recipientId)
+      .where('deleted', '==', false)
+      .get();
+
+    // Requête 2 : recipientId -> senderId
+    const snapshot2 = await filesCollection
+      .where('senderId', '==', recipientId)
+      .where('receiverId', '==', senderId)
+      .where('deleted', '==', false)
+      .get();
+
     let results = [];
-    const snapshot1 = await getDocs(q1);
-    snapshot1.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
-    const snapshot2 = await getDocs(q2);
-    snapshot2.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+
+    // Parcourir les documents de la première requête
+    snapshot1.forEach(doc => {
+      results.push({ id: doc.id, ...doc.data() });
+    });
     
+    // Parcourir les documents de la deuxième requête
+    snapshot2.forEach(doc => {
+      results.push({ id: doc.id, ...doc.data() });
+    });
+
+    // Tri par date d'upload
     results.sort((a, b) => new Date(a.uploadedAt) - new Date(b.uploadedAt));
+
     return res.json(results);
+
   } catch (error) {
+    // Log explicite de l'erreur côté serveur
     console.error("Erreur dans /api/files :", error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
