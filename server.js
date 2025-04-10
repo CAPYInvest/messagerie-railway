@@ -1,31 +1,22 @@
 // server.js
 
 // ============ Partie Messagerie ============
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 const connectedClients = {};
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
+const { verifyMemberstackToken } = require('./middleware/auth');
+const router = express.Router();
 
 
-// Middleware pour valider le token Memberstack
-function verifyMemberstackToken(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Non autorisé : token manquant" });
-  }
-  const token = authHeader.split(" ")[1];
-  try {
-    // Vérifiez le token à l'aide de la clé secrète stockée dans process.env.MEMBERSTACK_SECRET
-    const decoded = jwt.verify(token, process.env.MEMBERSTACK_SECRET);
-    req.member = decoded; // Stocke les informations du token dans req.member
-    next();
-  } catch (err) {
-    console.error("Token invalide :", err);
-    return res.status(401).json({ error: "Token invalide" });
-  }
-}
+
+//Import route token
+const authRoutes = require('./routes/auth');
+app.use('/api', authRoutes);
 
 
 const { initializeApp } = require('firebase/app');
