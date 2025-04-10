@@ -1,4 +1,4 @@
-Firestore// server.js
+/* Firestore - Storage - server.js */
 
 // ============ Partie Constante ============
 require('dotenv').config();
