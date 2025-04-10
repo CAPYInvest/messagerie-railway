@@ -30,7 +30,7 @@ admin.initializeApp({
 const bucket = admin.storage().bucket();
 
 // Utilisez l'Admin SDK pour Firestore
-const db = getFirestore(firebaseApp);
+const db = admin.firestore();
 
 
 
