@@ -217,7 +217,13 @@ app.get('/api/messages', requireAuth, async (req, res) => {
     }
 
     // Tri par date croissante (du plus ancien au plus récent)
-    results.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    allMessages.sort((a, b) => getTimeValue(b.timestamp) - getTimeValue(a.timestamp));
+
+    
+    console.log("Après tri (du plus récent au plus ancien) :");
+allMessages.forEach(m => {
+  console.log(`messageID=${m.id}, sender=${m.senderId}, receiver=${m.receiverId}, timestamp=${m.timestamp}`);
+});
 
     return res.json(results);
   } catch (error) {
