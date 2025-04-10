@@ -225,21 +225,23 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
     // Comme Firestore ne gère pas le OR direct sur deux champs,
     // on fait deux requêtes et on fusionne.
     const messagesColl = db.collection('messages');
-
-    const qA = query(messagesColl, where('senderId', '==', userId));
-    const qB = query(messagesColl, where('receiverId', '==', userId));
-
+     
+    // Récupérer les messages où l'utilisateur est l'expéditeur
+    const snapshotA = await messagesCollection
+      .where('senderId', '==', userId)
+      .get();
+    
+    // Récupérer les messages où l'utilisateur est le destinataire
+    const snapshotB = await messagesCollection
+      .where('receiverId', '==', userId)
+      .get();
+    
     let allMessages = [];
 
-    // Récup query A
-    const snapA = await getDocs(qA);
-    snapA.forEach(doc => {
+    snapshotA.forEach(doc => {
       allMessages.push({ id: doc.id, ...doc.data() });
     });
-
-    // Récup query B
-    const snapB = await getDocs(qB);
-    snapB.forEach(doc => {
+    snapshotB.forEach(doc => {
       allMessages.push({ id: doc.id, ...doc.data() });
     });
 
