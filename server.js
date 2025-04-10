@@ -14,40 +14,26 @@ const { requireAuth } = require('./middlewareauth');
 const authRoutes = require('./routesauth');
 const router = express.Router();
 const app = express();
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+// Initialisation firebase admin pour pouvoir avoir acccès au Storage
+const admin = require('firebase-admin');
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
 
 
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: "capy-invest.firebasestorage.app"
+});
+const bucket = admin.storage().bucket();
 
-
-const { initializeApp } = require('firebase/app');
-const {
-  getFirestore,
-  collection,
-  addDoc,
-  getDocs,
-  query,
-  where,
-  doc,
-  getDoc,           
-  updateDoc,
-  deleteDoc,      
-} = require('firebase/firestore');
-
-// 1) Config Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyAZlyFn_umf-L_9XWgBXANVpfP3Qd_pYPE",
-  authDomain: "capy-invest.firebaseapp.com",
-  databaseURL: "https://capy-invest-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "capy-invest",
-  storageBucket: "capy-investheroku.firebaseapp.com",
-  messagingSenderId: "1056270478078",
-  appId: "1:1056270478078:web:5f54bdabd1f0ce662253af",
-  measurementId: "G-WD1T00C496"
-};
-
-// 2) Init Firebase
-const firebaseApp = initializeApp(firebaseConfig);
+// Utilisez l'Admin SDK pour Firestore
 const db = getFirestore(firebaseApp);
+
+
+
 
 // 3) Express + Socket.io
 app.use(cors({
@@ -535,26 +521,8 @@ app.post('/api/create-room', requireAuth, async (req, res) => {
 
 
 
-// Utilisation de firebase-admin et multer pour des opérations sécurisées sur Firebase Storage
-const admin = require('firebase-admin');
-const multer = require('multer');
 
-const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-console.log("FIREBASE_SERVICE_ACCOUNT =>", process.env.FIREBASE_SERVICE_ACCOUNT);
-const serviceAccount = JSON.parse(serviceAccountJson);
 
-// Remplacer les séquences littérales "\\n" par de vrais retours à la ligne
-serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-
-// Initialiser firebase-admin avec les informations d'authentification et le bucket
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  storageBucket: "capy-invest.firebasestorage.app"
-});
-const bucket = admin.storage().bucket();
-
-// Configuration de multer pour stocker les fichiers en mémoire
-const upload = multer({ storage: multer.memoryStorage() });
 
 
 
