@@ -1,6 +1,6 @@
 // server.js
 
-// ============ Partie Messagerie ============
+// ============ Partie Constante ============
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -14,9 +14,7 @@ const router = express.Router();
 const app = express();
 
 
-//Import route token
-const authRoutes = require('./routes/auth');
-app.use('/api', authRoutes);
+
 
 
 const { initializeApp } = require('firebase/app');
@@ -57,6 +55,12 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+
+//Import route token
+const authRoutes = require('./routes/auth');
+app.use('/api', authRoutes);
+
 
 // Serveur HTTP + Socket.io
 const httpServer = http.createServer(app);
