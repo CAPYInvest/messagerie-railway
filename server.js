@@ -444,16 +444,16 @@ app.delete('/api/messages/:id', requireAuth, async (req, res) => {
   try {
     const messageId = req.params.id;
     // userId peut être passé en query ?userId=xxx ou dans le body
-    // Ici, on le récupère en query pour l’exemple
     const { userId } = req.query;
 
     if (!messageId || !userId) {
       return res.status(400).json({ error: 'Paramètres messageId et userId requis' });
     }
 
-    const docRef = doc(db, 'messages', messageId);
-    const docSnap = await getDoc(docRef);
-    if (!docSnap.exists()) {
+    // Utiliser la syntaxe de l'Admin SDK
+    const docRef = db.collection('messages').doc(messageId);
+    const docSnap = await docRef.get();
+    if (!docSnap.exists) {
       return res.status(404).json({ error: 'Message introuvable' });
     }
 
@@ -463,12 +463,12 @@ app.delete('/api/messages/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
 
-    // Suppression Firestore
-    await deleteDoc(docRef);
+    // Suppression via delete() de l'objet document
+    await docRef.delete();
 
     console.log(`Message ${messageId} supprimé par ${userId}`);
 
-    // Émettre un événement Socket.io => tous les clients peuvent se mettre à jour
+    // Émettre un événement Socket.io pour mettre à jour les clients
     io.emit('messageDeleted', {
       id: messageId,
       senderId: messageData.senderId,
@@ -481,6 +481,7 @@ app.delete('/api/messages/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Erreur interne' });
   }
 });
+
 
 //---------------------------------------------------------------------
 // ROUTE 7 : VISIOCONFERENCE création de room :  /api/create-room
