@@ -659,8 +659,47 @@ app.delete('/api/files/:id', requireAuth, async (req, res) => {
   }
 });
 
+//---------------------------------------------------------------------
+// ROUTE 11 : Gestionnaire de fichier : URL signée pour le téléchargement /api/signed-url...
+//---------------------------------------------------------------------
 
-
+// Endpoint pour générer une URL signée pour le téléchargement d'un fichier
+app.get('/api/signed-url', requireAuth, async (req, res) => {
+  try {
+    const { fileId } = req.query;
+    if (!fileId) {
+      return res.status(400).json({ error: 'Paramètre fileId requis' });
+    }
+    
+    // Récupérer le document Firestore dans la collection "sharedFiles"
+    const fileDocRef = db.collection('sharedFiles').doc(fileId);
+    const fileDocSnap = await fileDocRef.get();
+    if (!fileDocSnap.exists) {
+      return res.status(404).json({ error: 'Document introuvable' });
+    }
+    const fileData = fileDocSnap.data();
+    
+    // Extraire le chemin du fichier à partir de l'URL publique enregistrée
+    const filePath = fileData.fileUrl.split(`https://storage.googleapis.com/${bucket.name}/`)[1];
+    if (!filePath) {
+      return res.status(400).json({ error: 'Chemin de fichier introuvable' });
+    }
+    
+    // Configurer l'URL signée (ici valable 1 heure)
+    const config = {
+      action: 'read',
+      expires: Date.now() + 3600000 // 1 heure en millisecondes
+    };
+    
+    const [signedUrl] = await bucket.file(filePath).getSignedUrl(config);
+    console.log("URL signée générée :", signedUrl);
+    return res.json({ signedUrl });
+    
+  } catch (error) {
+    console.error("Erreur lors de la génération de l’URL signée :", error);
+    return res.status(500).json({ error: error.message });
+  }
+});
 
 
 
