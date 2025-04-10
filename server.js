@@ -6,6 +6,27 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 const connectedClients = {};
+const jwt = require('jsonwebtoken');
+
+
+// Middleware pour valider le token Memberstack
+function verifyMemberstackToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Non autorisé : token manquant" });
+  }
+  const token = authHeader.split(" ")[1];
+  try {
+    // Vérifiez le token à l'aide de la clé secrète stockée dans process.env.MEMBERSTACK_SECRET
+    const decoded = jwt.verify(token, process.env.MEMBERSTACK_SECRET);
+    req.member = decoded; // Stocke les informations du token dans req.member
+    next();
+  } catch (err) {
+    console.error("Token invalide :", err);
+    return res.status(401).json({ error: "Token invalide" });
+  }
+}
+
 
 const { initializeApp } = require('firebase/app');
 const {
@@ -108,7 +129,7 @@ function sanitizeString(str) {
 // ----------------------------------------------
 // ROUTE 1 : POST /api/messages (ajout d’un message)
 // ----------------------------------------------
-app.post('/api/messages', async (req, res) => {
+app.post('/api/messages', verifyMemberstackToken, async (req, res) => {
   try {
     const { message, senderId, receiverId } = req.body;
     if (!message || !senderId || !receiverId) {
@@ -148,7 +169,7 @@ app.post('/api/messages', async (req, res) => {
 // ----------------------------------------------
 // ROUTE 2 : GET /api/messages?senderId=xxx&recipientId=yyy
 // ----------------------------------------------
-app.get('/api/messages', async (req, res) => {
+app.get('/api/messages', verifyMemberstackToken, async (req, res) => {
   try {
     const { senderId, recipientId } = req.query;
     if (!senderId || !recipientId) {
@@ -211,7 +232,7 @@ app.get('/api/messages', async (req, res) => {
 // ----------------------------------------------
 
 // Nouvelle route : GET /api/last-message?userId=XXX
-app.get('/api/last-message', async (req, res) => {
+app.get('/api/last-message', verifyMemberstackToken, async (req, res) => {
   try {
     const { userId } = req.query;
     if (!userId) {
@@ -284,7 +305,7 @@ app.get('/api/last-message', async (req, res) => {
 //    const { initializeApp } = require('firebase/app');
 //    const { getFirestore, collection, getDocs, query, where } = require('firebase/firestore');
 
-app.get('/api/unread', async (req, res) => {
+app.get('/api/unread', verifyMemberstackToken, async (req, res) => {
   try {
     const { userId } = req.query;
     if (!userId) {
@@ -359,7 +380,7 @@ app.get('/api/unread', async (req, res) => {
 // ROUTE 5 : PUT /api/messages/:id
 // Permet de modifier un message existant si on est l’expéditeur
 //---------------------------------------------------------------------
-app.put('/api/messages/:id', async (req, res) => {
+app.put('/api/messages/:id', verifyMemberstackToken, async (req, res) => {
   try {
     const messageId = req.params.id;
     const { userId, newContent } = req.body; 
@@ -413,7 +434,7 @@ app.put('/api/messages/:id', async (req, res) => {
 // ROUTE 6 : DELETE /api/messages/:id
 // Permet de supprimer un message si on est l’expéditeur
 //---------------------------------------------------------------------
-app.delete('/api/messages/:id', async (req, res) => {
+app.delete('/api/messages/:id', verifyMemberstackToken, async (req, res) => {
   try {
     const messageId = req.params.id;
     // userId peut être passé en query ?userId=xxx ou dans le body
@@ -460,7 +481,7 @@ app.delete('/api/messages/:id', async (req, res) => {
 // Endpoint pour créer une salle Daily
 //---------------------------------------------------------------------
 
-app.post('/api/create-room', async (req, res) => {
+app.post('/api/create-room', verifyMemberstackToken, async (req, res) => {
   try {
     const { type } = req.body; // "audio" ou "video"
 
@@ -547,7 +568,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 //---------------------------------------------------------------------
 
 // Endpoint pour uploader un fichier
-app.post('/api/upload-file', upload.single('file'), async (req, res) => {
+app.post('/api/upload-file', verifyMemberstackToken, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "Aucun fichier fourni." });
@@ -618,7 +639,7 @@ app.post('/api/upload-file', upload.single('file'), async (req, res) => {
 //---------------------------------------------------------------------
 
 // Endpoint pour récupérer la liste des fichiers échangés entre deux utilisateurs
-app.get('/api/files', async (req, res) => {
+app.get('/api/files', verifyMemberstackToken, async (req, res) => {
   try {
     const { senderId, recipientId } = req.query;
     if (!senderId || !recipientId) {
@@ -660,7 +681,7 @@ app.get('/api/files', async (req, res) => {
 //---------------------------------------------------------------------
 
 // Endpoint pour supprimer un fichier (via son ID Firestore)
-app.delete('/api/files/:id', async (req, res) => {
+app.delete('/api/files/:id', verifyMemberstackToken, async (req, res) => {
   try {
     const fileId = req.params.id;
     if (!fileId) {
