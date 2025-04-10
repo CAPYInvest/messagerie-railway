@@ -1,18 +1,18 @@
+// middlewareauth.js
 const jwt = require('jsonwebtoken');
-const axios = require('axios');
 
-// Exemple de middleware requireAuth dans middlewareauth.js :
 async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authentification requise' });
   }
   const token = authHeader.split(' ')[1];
+  console.log("Token reçu :", token); // Vérifiez ici la valeur du token
 
   try {
-    // Utilisez ici la clé pour vérifier le token personnalisé
+    // Vérifier que le token est signé avec la bonne clé
     const decoded = jwt.verify(token, process.env.MEMBERSTACK_SECRET_TOKEN);
-    req.member = decoded; // Par exemple, { uid: "mem_cm76iojn20avf0spj2h050pp9", iat: ..., exp: ... }
+    req.member = decoded;  // Par exemple, { uid: "...", iat: ..., exp: ... }
     next();
   } catch (err) {
     console.error("Token invalide :", err);
@@ -21,3 +21,4 @@ async function requireAuth(req, res, next) {
 }
 
 module.exports = { requireAuth };
+
