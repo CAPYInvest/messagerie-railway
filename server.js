@@ -9,7 +9,7 @@ const { Server } = require('socket.io');
 const connectedClients = {};
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
-const { verifyMemberstackToken } = require('./middleware/auth');
+const { verifyMemberstackToken } = require('.middlewareauth');
 const router = express.Router();
 const app = express();
 
@@ -58,7 +58,7 @@ app.use(express.json());
 
 
 //Import route token
-const authRoutes = require('./routes/auth');
+const authRoutes = require('./routesauth');
 app.use('/api', authRoutes);
 
 
