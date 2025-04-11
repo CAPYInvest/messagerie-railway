@@ -63,11 +63,15 @@ app.use('/api', authRoutes);
 //-------------------------------------------------------------------------------
 
 // Configuration des middlewares globaux
-app.use(bodyParser.json());
+app.use(bodyParser.json({
+  verify: (req, res, buf, encoding) => {
+    req.rawBody = buf.toString(encoding || 'utf8');
+  }
+}));
 
-// Importation du module de synchronisation
-const { router: syncRouter } = require('./sync_memberstack_firebase');
-app.use('/api', syncRouter);
+// Importation du module de synchronisation webhook
+const { router: webhookRouter } = require('./sync_memberstack_firebase');
+app.use('/api/webhook', webhookRouter);
 
 
 
