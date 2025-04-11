@@ -9,9 +9,12 @@ const { Server } = require('socket.io');
 const connectedClients = {};
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const bodyParser = require('body-parser');
+
 // Importez le middleware d'authentification depuis middlewareauth.js et routes
 const { requireAuth } = require('./middlewareauth');
 const authRoutes = require('./routesauth');
+
 const router = express.Router();
 const app = express();
 const multer = require('multer');
@@ -46,7 +49,11 @@ app.use(express.json());
 
 
 //Import route token
-app.use('/api', authRoutes);
+
+
+//-------------------------------------------------------------------------------
+// Gestion des socket.io pour affichage temps réel  
+//-------------------------------------------------------------------------------
 
 
 // Serveur HTTP + Socket.io
@@ -60,11 +67,9 @@ const io = new Server(httpServer, {
 
 io.on('connection', (socket) => {
   console.log('Un client est connecté à Socket.io :', socket.id);
-  //-------------------------------------------------------------------------------
   // AJOUT VISIOCONF : Écouter l’événement "register" pour enregistrer le memberId
   // DE : socket.on('register', (data) => {
   // A : console.log(`Client déconnecté : ${socket.memberId}`);
-  //-------------------------------------------------------------------------------
    // Écoute de l'enregistrement du memberId
    socket.on('register', (data) => {
     if (data && data.memberId) {
@@ -110,8 +115,12 @@ function sanitizeString(str) {
 
 
 
+
+
+
+
 // ------------------------------------------------
-// Fonctions utilitaires
+// Fonctions utilitaires Messagerie
 //-----------------------------------------------
 
 
