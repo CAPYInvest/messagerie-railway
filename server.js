@@ -49,6 +49,7 @@ app.use(express.json());
 
 
 //Import route token
+app.use('/api', authRoutes);
 
 
 //-------------------------------------------------------------------------------
