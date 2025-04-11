@@ -1,13 +1,14 @@
 // sync_memberstack_firebase.js
 const express = require('express');
 const router = express.Router();
-const axios = require('axios');
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 
-// Initialisation de Firebase Admin (si non déjà faite) avec la configuration issue de la variable d'environnement Railway
+// Initialisation de Firebase Admin si ce n'est pas déjà fait
 if (!admin.apps.length) {
-  console.warn("Firebase Admin n'était pas initialisé. Initialisation depuis les variables d'environnement.");
+  console.warn("Initialisation de Firebase Admin depuis le module webhook.");
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  // Correction du format de la clé privée
   serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
   admin.initializeApp({
@@ -16,116 +17,88 @@ if (!admin.apps.length) {
   });
 }
 
-// Initialisation de Firestore
+// Accès à Firestore
 const db = admin.firestore();
 
-// Récupération de la clé API Memberstack depuis l'environnement
-const API_KEY = process.env.MEMBERSTACK_SECRET_KEY || process.env.MEMBERSTACK_SECRET;
-if (!API_KEY) {
-  throw new Error('La clé API Memberstack n\'est pas définie dans les variables d\'environnement.');
+/**
+ * Fonction pour vérifier la signature du webhook.
+ * @param {string} rawBody - Le corps brut de la requête.
+ * @param {string} signatureHeader - La signature reçue dans l'en-tête.
+ * @param {string} secret - Le Signing Secret fourni par MemberStack.
+ * @returns {boolean} - Vrai si la signature est valide, faux sinon.
+ */
+function verifySignature(rawBody, signatureHeader, secret) {
+  const computedSignature = crypto
+    .createHmac('sha256', secret)
+    .update(rawBody, 'utf8')
+    .digest('hex');
+  return computedSignature === signatureHeader;
 }
 
-// Création d'une instance Axios configurée pour l'API Memberstack
-const memberstackClient = axios.create({
-  baseURL: 'https://admin.memberstack.com', // URL de base selon la doc officielle de Memberstack
-  headers: {
-    'X-API-KEY': API_KEY,
-    'Content-Type': 'application/json'
-  }
-});
-
-// Intercepteur pour gérer notamment les erreurs (ex. rate limiting)
-memberstackClient.interceptors.response.use(
-  response => response,
-  async error => {
-    if (error.response && error.response.status === 429) {
-      console.log('Taux de requêtes dépassé (429). Nouvelle tentative après délai...');
-      await new Promise(resolve => setTimeout(resolve, 2000)); // attente de 2 secondes avant réessai
-      return memberstackClient.request(error.config);
-    }
-    console.error('Erreur lors de l\'appel à l\'API Memberstack :', {
-      status: error.response?.status,
-      url: error.config?.url,
-      method: error.config?.method
-    });
-    return Promise.reject(error);
-  }
-);
-
-// Middleware pour interpréter le corps en JSON
+// Middleware pour s'assurer que le corps de la requête est traité en JSON
 router.use(express.json());
 
-/**
- * Endpoint POST déclenché lors d'une inscription.
- * Il reçoit les données du formulaire, récupère les infos complètes via l'API Memberstack (si possible),
- * puis enregistre/actualise ces données dans Firestore.
- */
-router.post('/sync/member', async (req, res) => {
+router.post('/memberstack', async (req, res) => {
   try {
-    const memberData = req.body;
-
-    // Vérification minimale : l'email est requis.
-    if (!memberData.email) {
-      return res.status(400).send('Email obligatoire pour la synchronisation.');
+    // Récupération du corps brut
+    const rawBody = req.rawBody;
+    // Récupérer la signature depuis l'en-tête (ajustez le nom de l'en-tête selon la doc MemberStack)
+    const signatureHeader = req.headers['x-membersignature'];
+    if (!signatureHeader) {
+      return res.status(401).send('Signature manquante');
     }
 
-    let memberFromApi = null;
-    if (memberData.id) {
-      // Si un identifiant de membre est fourni, on tente de récupérer les infos complètes via l'API
-      const response = await memberstackClient.get(`/members/${memberData.id}`);
-      memberFromApi = response.data;
-    } else {
-      // Sinon, nous utilisons directement les données reçues
-      memberFromApi = memberData;
+    // Vérification de la signature avec le Signing Secret
+    const msSigningSecret = process.env.MS_SIGNING_SECRET;
+    if (!msSigningSecret) {
+      console.error("MS_SIGNING_SECRET non définie dans les variables d'environnement.");
+      return res.status(500).send("Configuration serveur incomplète");
+    }
+    if (!verifySignature(rawBody, signatureHeader, msSigningSecret)) {
+      return res.status(401).send('Signature invalide');
     }
 
-    // Vérification que les données essentielles sont présentes
-    if (!memberFromApi.id || !memberFromApi.email) {
-      return res.status(400).send('Données incomplètes pour la synchronisation.');
+    // Extraction du payload JSON
+    const { event, data } = req.body;
+    if (!event || !data || !data.id) {
+      return res.status(400).send("Payload invalide");
     }
 
-    // Mise à jour ou création du document dans la collection Firestore 'users'
-    await db.collection('users').doc(memberFromApi.id).set({
-      email: memberFromApi.email,
-      customFields: memberFromApi.customFields || {}
-    }, { merge: true });
-
-    console.log(`Synchronisation réussie pour le membre ${memberFromApi.id}`);
-    res.status(200).json({ message: 'Synchronisation effectuée.' });
-  } catch (error) {
-    console.error('Erreur lors de la synchronisation du membre :', error);
-    res.status(500).send('Erreur lors de la synchronisation.');
-  }
-});
-
-/**
- * Endpoint GET pour une synchronisation globale de tous les membres.
- * Accessible via : https://messagerie-railway-production-4894.up.railway.app/api/sync/members
- */
-router.get('/sync/members', async (req, res) => {
-  try {
-    const response = await memberstackClient.get('/members');
-    const members = response.data.members;
-    if (!members || !Array.isArray(members)) {
-      return res.status(500).send('Format de réponse invalide depuis l\'API Memberstack.');
-    }
-
-    for (const member of members) {
-      if (!member.id || !member.email) {
-        console.warn('Membre ignoré en raison de données incomplètes :', member);
-        continue;
+    // Traitement selon le type d'événement
+    if (['member.created', 'member.updated', 'member.plan.added', 'member.plan.updated'].includes(event)) {
+      if (!data.email) {
+        return res.status(400).send("Email manquant dans le payload");
       }
-      await db.collection('users').doc(member.id).set({
-        email: member.email,
-        customFields: member.customFields || {}
-      }, { merge: true });
+
+      // Construction des données utilisateur à mettre à jour dans Firestore
+      const userData = {
+        email: data.email,
+        Adresse: data.customFields && data.customFields["Adresse"] ? data.customFields["Adresse"] : null,
+        CodePostal: data.customFields && data.customFields["Code postal"] ? data.customFields["Code postal"] : null,
+        Nom: data.customFields && data.customFields["Nom"] ? data.customFields["Nom"] : null,
+        Prenom: data.customFields && data.customFields["Prénom"] ? data.customFields["Prénom"] : null,
+        Phone: data.customFields && data.customFields["Phone"] ? data.customFields["Phone"] : null,
+        Conseiller: data.customFields && data.customFields["Conseiller"] ? data.customFields["Conseiller"] : null,
+        Ville: data.customFields && data.customFields["Ville"] ? data.customFields["Ville"] : null,
+        plans: data.plans || null  // Met à jour le champ plans selon le payload
+      };
+
+      // Mise à jour (ou création) du document dans la collection 'users'
+      await db.collection('users').doc(data.id).set(userData, { merge: true });
+      console.log(`Synchronisation réussie pour le membre ${data.id} via l'événement ${event}`);
+    } else if (event === 'member.deleted') {
+      // Suppression du document correspondant dans Firestore
+      await db.collection('users').doc(data.id).delete();
+      console.log(`Membre ${data.id} supprimé via l'événement ${event}`);
+    } else {
+      console.log(`Événement non géré : ${event}`);
     }
 
-    console.log(`Synchronisation globale effectuée pour ${members.length} membres.`);
-    res.send(`Synchronisation globale effectuée pour ${members.length} membres.`);
+    // Répondre avec succès à MemberStack
+    res.sendStatus(200);
   } catch (error) {
-    console.error('Erreur lors de la synchronisation globale :', error);
-    res.status(500).send('Erreur lors de la synchronisation globale.');
+    console.error("Erreur lors du traitement du webhook MemberStack :", error);
+    res.status(500).send("Erreur serveur lors du traitement du webhook");
   }
 });
 
