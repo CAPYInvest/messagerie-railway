@@ -48,8 +48,28 @@ app.use(cors({
 app.use(express.json());
 
 
+
+
+
 //Import route token
 app.use('/api', authRoutes);
+
+
+
+
+
+//-------------------------------------------------------------------------------
+// synchronisation des comptes MemberStack avec une base de données Firebase via Webhook memberstack
+//-------------------------------------------------------------------------------
+
+// Configuration des middlewares globaux
+app.use(bodyParser.json());
+
+// Importation du module de synchronisation
+const { router: syncRouter } = require('./sync_memberstack_firebase');
+app.use('/api', syncRouter);
+
+
 
 
 //-------------------------------------------------------------------------------
