@@ -1,23 +1,26 @@
 // sync_memberstack_firebase.js
+const { Webhook } = require("svix");
 const express = require('express');
 const router = express.Router();
-const crypto = require('crypto');
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 
+
+// ... Init Firebase Admin etc. ...
 // Initialisation de Firebase Admin s'il n'est pas déjà fait
 if (!admin.apps.length) {
-  console.warn("Initialisation de Firebase Admin depuis le module webhook.");
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  // Correction du format de la clé privée
-  serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    storageBucket: "capy-invest.firebasestorage.app"
-  });
-}
-
-// Accès à Firestore
-const db = admin.firestore();
+    console.warn("Initialisation de Firebase Admin depuis le module webhook.");
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    // Correction du format de la clé privée
+    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      storageBucket: "capy-invest.firebasestorage.app"
+    });
+  }
+  
+  // Accès à Firestore
+  const db = admin.firestore();
 
 /**
  * Vérifie la signature HMAC-SHA256 du webhook.
@@ -27,82 +30,79 @@ const db = admin.firestore();
  * @returns {boolean} - Vrai si la signature est valide, faux sinon.
  */
 function verifySignature(rawBody, signatureHeader, secret) {
-  const computedSignature = crypto
-    .createHmac('sha256', secret)
-    .update(rawBody, 'utf8')
-    .digest('hex');
-  return computedSignature === signatureHeader;
-}
+    const computedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(rawBody, 'utf8')
+      .digest('hex');
+    return computedSignature === signatureHeader;
+  }
 
-// Note : Nous ne réappliquons pas express.json() ici pour ne pas écraser req.rawBody
-
-/**
- * Endpoint POST pour recevoir les webhooks MemberStack.
- * L'URL de configuration dans MemberStack devra être :
- * https://votre-domaine/api/webhook/memberstack
- */
+// On n'utilise plus verifySignature(...) au sens HMAC simple :
 router.post('/memberstack', async (req, res) => {
   try {
-    // Récupération du corps brut
+    // corps brut
     const rawBody = req.rawBody;
-    // Récupération de la signature dans l'en-tête (ajustez le nom si nécessaire)
-    const signatureHeader = req.headers['x-membersignature'];
-    if (!signatureHeader) {
-      return res.status(401).send('Signature manquante');
-    }
+    // en-têtes complets
+    const headers = req.headers;
 
-    // Vérification de la signature à l'aide du Signing Secret
+    // On récupère la clé secrète
     const msSigningSecret = process.env.MS_SIGNING_SECRET;
     if (!msSigningSecret) {
-      console.error("MS_SIGNING_SECRET non définie dans les variables d'environnement.");
+      console.error("MS_SIGNING_SECRET non définie");
       return res.status(500).send("Configuration serveur incomplète");
     }
-    if (!verifySignature(rawBody, signatureHeader, msSigningSecret)) {
-      return res.status(401).send('Signature invalide');
+
+    // On prépare le webhook verifier de Svix
+    const wh = new Webhook(msSigningSecret);
+
+    let event;
+    try {
+      // La méthode verify va lever une exception si la signature ne correspond pas
+      event = wh.verify(rawBody, headers);
+      // event contient alors le JSON parsé : event.event, event.payload, etc.
+    } catch (err) {
+      console.error("Signature Svix invalide :", err.message);
+      return res.status(401).send("Signature invalide");
     }
 
-    // Extraction de l'événement et des données depuis le payload
-    // Certains webhooks utilisent "payload", d'autres "data"
-    const { event } = req.body;
-    const data = req.body.payload || req.body.data;
-    if (!event || !data || !data.id) {
+    // Extractions
+    const type = event.event;      // ex: "member.created"
+    const data = event.payload;    // ex: { auth: {...}, customFields: {...}, id: "...", ... }
+
+    if (!type || !data || !data.id) {
       return res.status(400).send("Payload invalide");
     }
 
-    // Récupérer l'email : s'il se trouve dans data.auth.email (comme dans vos logs), sinon dans data.email
-    const email = (data.auth && data.auth.email) ? data.auth.email : data.email;
-
-    // Selon l'événement, on effectue la synchronisation
-    if (['member.created', 'member.updated', 'member.plan.added', 'member.plan.updated'].includes(event)) {
+    // Ensuite, on traite comme avant :
+    if (["member.created", "member.updated", "member.plan.added", "member.plan.updated"].includes(type)) {
+      const email = data.auth?.email || data.email;
       if (!email) {
-        return res.status(400).send("Email manquant dans le payload");
+        return res.status(400).send("Email manquant");
       }
 
-      // Construction de l'objet utilisateur à enregistrer dans Firestore
+      // Récupération / Mapping
       const userData = {
-        email: email,
-        Adresse: data.customFields && data.customFields["Adresse"] ? data.customFields["Adresse"] : null,
-        CodePostal: data.customFields && data.customFields["Code postal"] ? data.customFields["Code postal"] : null,
-        Nom: data.customFields && data.customFields["Nom"] ? data.customFields["Nom"] : null,
-        Prenom: data.customFields && data.customFields["Prénom"] ? data.customFields["Prénom"] : null,
-        Phone: data.customFields && data.customFields["Phone"] ? data.customFields["Phone"] : null,
-        Conseiller: data.customFields && data.customFields["Conseiller"] ? data.customFields["Conseiller"] : null,
-        Ville: data.customFields && data.customFields["Ville"] ? data.customFields["Ville"] : null,
-        plans: data.planConnections || null
+        email,
+        Adresse: data.customFields?.["Adresse"] || null,
+        CodePostal: data.customFields?.["Code postal"] || null,
+        Nom: data.customFields?.["Nom"] || null,
+        Prenom: data.customFields?.["Prénom"] || null,
+        Phone: data.customFields?.["Phone"] || null,
+        Conseiller: data.customFields?.["Conseiller"] || null,
+        Ville: data.customFields?.["Ville"] || null,
+        plans: data.planConnections || null,
       };
 
-      // Mise à jour (ou création) du document dans Firestore (collection "users")
       await db.collection('users').doc(data.id).set(userData, { merge: true });
-      console.log(`Synchronisation réussie pour le membre ${data.id} via l'événement ${event}`);
-    } else if (event === 'member.deleted') {
-      // Suppression du document correspondant dans Firestore
+      console.log(`Synchronisation OK pour le membre ${data.id} via ${type}`);
+    } else if (type === "member.deleted") {
       await db.collection('users').doc(data.id).delete();
-      console.log(`Membre ${data.id} supprimé via l'événement ${event}`);
+      console.log(`Membre ${data.id} supprimé`);
     } else {
-      console.log(`Événement non géré : ${event}`);
+      console.log(`Événement non géré : ${type}`);
     }
 
-    // Répondre avec succès
+    // on répond 200
     res.sendStatus(200);
   } catch (error) {
     console.error("Erreur lors du traitement du webhook MemberStack :", error);
