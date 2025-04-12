@@ -28,42 +28,59 @@ router.use(express.json());
  */
 router.post('/memberstack', async (req, res) => {
   try {
-    // Extraction de l'événement et du payload depuis le corps de la requête
+    // Extraction de l'événement et du payload
     const event = req.body.event;
     const payload = req.body.payload;
+    
+    // Journalisation complète pour le debugging
+    console.log("Payload complet reçu :", JSON.stringify(req.body, null, 2));
+    console.log("Payload customFields :", JSON.stringify(payload.customFields, null, 2));
+
     if (!event || !payload || !payload.id) {
       console.error("Payload invalide :", req.body);
       return res.status(400).send("Payload invalide");
     }
     
-    // Extraction de l'email : soit dans payload.auth.email, sinon payload.email
+    // Récupération de l'e-mail : soit payload.auth.email, sinon payload.email
     const email = (payload.auth && payload.auth.email) ? payload.auth.email : payload.email;
     
-    // Préparation de l'objet utilisateur à enregistrer dans Firestore
+    // Préparation de l'objet à enregistrer dans Firestore. 
+    // On gère les variations en vérifiant d'abord la version "standard" puis celle en minuscules avec tiret (ou sans espace).
     const userData = {
       email: email,
-      Adresse: payload.customFields && payload.customFields["Adresse"] ? payload.customFields["Adresse"] : null,
-      CodePostal: payload.customFields && payload.customFields["Code postal"] ? payload.customFields["Code postal"] : null,
-      // Pour "Nom" et "Prénom", on teste d'abord s'ils existent directement ; sinon, on utilise "last-name" et "first-name"
-      Nom: payload.customFields && payload.customFields["Nom"] ? payload.customFields["Nom"] : (payload.customFields && payload.customFields["last-name"] ? payload.customFields["last-name"] : null),
-      Prenom: payload.customFields && payload.customFields["Prénom"] ? payload.customFields["Prénom"] : (payload.customFields && payload.customFields["first-name"] ? payload.customFields["first-name"] : null),
-      Phone: payload.customFields && payload.customFields["Phone"] ? payload.customFields["Phone"] : null,
-      Conseiller: payload.customFields && payload.customFields["Conseiller"] ? payload.customFields["Conseiller"] : null,
-      Ville: payload.customFields && payload.customFields["Ville"] ? payload.customFields["Ville"] : null,
+      Adresse: payload.customFields 
+                ? (payload.customFields["Adresse"] || payload.customFields["adresse"] || null)
+                : null,
+      CodePostal: payload.customFields 
+                   ? (payload.customFields["Code postal"] || payload.customFields["code-postal"] || null)
+                   : null,
+      Nom: payload.customFields 
+             ? (payload.customFields["Nom"] || payload.customFields["last-name"] || null)
+             : null,
+      Prenom: payload.customFields 
+                ? (payload.customFields["Prénom"] || payload.customFields["first-name"] || null)
+                : null,
+      Phone: payload.customFields 
+               ? (payload.customFields["Phone"] || payload.customFields["phone"] || null)
+               : null,
+      Conseiller: payload.customFields 
+                    ? (payload.customFields["Conseiller"] || payload.customFields["conseiller"] || null)
+                    : null,
+      Ville: payload.customFields 
+               ? (payload.customFields["Ville"] || payload.customFields["ville"] || null)
+               : null,
       plans: payload.planConnections || null
     };
 
-    // Traitement selon l'événement
     if (["member.created", "member.updated", "member.plan.added", "member.plan.updated"].includes(event)) {
       if (!email) {
         console.error("Email manquant dans le payload :", payload);
         return res.status(400).send("Email manquant dans le payload");
       }
-      // Création ou mise à jour du document dans Firestore, le document est identifié par payload.id
+      // Mise à jour (ou création) du document dans Firestore, identifié par payload.id
       await db.collection('users').doc(payload.id).set(userData, { merge: true });
       console.log(`Synchronisation réussie pour le membre ${payload.id} via l'événement ${event}`);
     } else if (event === "member.deleted") {
-      // Suppression du document dans Firestore
       await db.collection('users').doc(payload.id).delete();
       console.log(`Membre ${payload.id} supprimé via l'événement ${event}`);
     } else {
