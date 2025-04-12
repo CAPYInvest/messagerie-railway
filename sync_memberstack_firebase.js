@@ -18,34 +18,6 @@ const db = admin.firestore();
 
 router.use(express.json());
 
-/**
- * Endpoint pour traiter les webhooks MemberStack.
- * L'URL doit être configurée dans MemberStack comme :
- * https://messagerie-railway-production-4894.up.railway.app/api/webhook/memberstack
- *
- * Exemple de payload pour member.updated incluant profileImage :
- * {
- *   "event": "member.updated",
- *   "payload": {
- *      "auth": { "email": "gfgnfnf@gmail.com" },
- *      "customFields": {
- *         "adresse": "11 rue de Médicis",
- *         "code-postal": "63000",
- *         "first-name": "rfgnfgn",
- *         "last-name": "fgnfnfgnf",
- *         "phone": "0787097135",
- *         "ville": "Clermont-Ferrand"
- *      },
- *      "id": "mem_cm9ehhh2j0nav0wsrg4c5gmlz",
- *      "metaData": {},
- *      "profileImage": "https://ms-application-assets.s3.amazonaws.com/member-profile-images/1744478575046Starship_SpaceX.jpg",
- *      "stripeCustomerId": null,
- *      "verified": false
- *   },
- *   "reason": ["customFields.updated"],
- *   "timestamp": 1744478582757
- * }
- */
 router.post('/memberstack', async (req, res) => {
   try {
     const event = req.body.event;
@@ -53,87 +25,88 @@ router.post('/memberstack', async (req, res) => {
     
     console.log("Webhook reçu. event =", event, " payload =", JSON.stringify(payload, null, 2));
 
-    if (!event || !payload || (!payload.id && !(payload.member && payload.member.id))) {
+    if (!event || !payload) {
       console.error("Payload invalide :", req.body);
       return res.status(400).send("Payload invalide");
     }
     
+    // Extraction de l'ID membre et de l'email.
+    let memberId = null;
+    let email = null;
     
-    // Récupération de l'email : soit dans payload.auth.email, soit dans payload.email
-    const email = (payload.auth && payload.auth.email) ? payload.auth.email : payload.email;
+    if (payload.id) {
+      memberId = payload.id;
+      email = payload.auth && payload.auth.email ? payload.auth.email : payload.email;
+    }
+    if (!memberId && payload.member && payload.member.id) {
+      memberId = payload.member.id;
+      email = payload.member.email;
+    }
+
+    // Vérification renforcée : on doit disposer d'un ID non vide.
+    if (!memberId || typeof memberId !== 'string' || memberId.trim() === "") {
+      console.error("ID du membre invalide :", memberId, "Payload :", JSON.stringify(payload, null, 2));
+      return res.status(400).send("Impossible de déterminer l'ID du membre");
+    }
     
-    // Lecture du document existant ou création d'un objet vide
+    // Pour la mise à jour des champs de base et des custom fields
     const userDocData = await (async () => {
-      const docRef = db.collection('users').doc(payload.id);
+      const docRef = db.collection('users').doc(memberId);
       const snap = await docRef.get();
       return snap.exists ? snap.data() : {};
     })();
     
-    // Mise à jour des champs de base à partir du payload (si disponibles)
     if (email) {
       userDocData.email = email;
     }
     
-    // Mise à jour des custom fields
+    // Mise à jour des custom fields (adaptation selon vos structures)
     if (payload.customFields) {
-      if (payload.customFields["adresse"] || payload.customFields["Adresse"])
-        userDocData.Adresse = payload.customFields["adresse"] || payload.customFields["Adresse"];
-      if (payload.customFields["code-postal"] || payload.customFields["Code postal"])
-        userDocData.CodePostal = payload.customFields["code-postal"] || payload.customFields["Code postal"];
-      if (payload.customFields["first-name"] || payload.customFields["Prénom"])
-        userDocData.Prenom = payload.customFields["first-name"] || payload.customFields["Prénom"];
-      if (payload.customFields["last-name"] || payload.customFields["Nom"])
-        userDocData.Nom = payload.customFields["last-name"] || payload.customFields["Nom"];
-      if (payload.customFields["phone"] || payload.customFields["Phone"])
-        userDocData.Phone = payload.customFields["phone"] || payload.customFields["Phone"];
-      if (payload.customFields["ville"] || payload.customFields["Ville"])
-        userDocData.Ville = payload.customFields["ville"] || payload.customFields["Ville"];
-      // Vous pouvez ajouter ici d'autres champs custom si nécessaire.
+      userDocData.Adresse = payload.customFields["Adresse"] || payload.customFields["adresse"] || null;
+      userDocData.CodePostal = payload.customFields["Code postal"] || payload.customFields["code-postal"] || null;
+      userDocData.Prenom = payload.customFields["Prénom"] || payload.customFields["first-name"] || null;
+      userDocData.Nom = payload.customFields["Nom"] || payload.customFields["last-name"] || null;
+      userDocData.Phone = payload.customFields["Phone"] || payload.customFields["phone"] || null;
+      userDocData.Ville = payload.customFields["Ville"] || payload.customFields["ville"] || null;
+      // Vous pouvez ajouter d'autres champs personnalisés ici si besoin.
     }
     
-    // Mise à jour du champ profileImage (s'il est présent)
+    // Prise en compte du lien de l'image de profil
     if (payload.profileImage) {
       userDocData.profileImage = payload.profileImage;
     }
     
-    /**
-     * Traitement en fonction de l'événement
-     */
+    // Traitement par type d'événement
     if (["member.created", "member.updated"].includes(event)) {
-      // Pour member.created ou member.updated, si le payload inclut un tableau planConnections,
-      // nous le copions directement dans userDocData.plans.
+      // Pour les événements de base, on remplace éventuellement le tableau plans si présent
       if (payload.planConnections) {
         userDocData.plans = payload.planConnections;
       }
-      // Mise à jour ou création du document dans Firestore
-      await db.collection('users').doc(payload.id).set(userDocData, { merge: true });
-      console.log(`Synchronisation réussie pour le membre ${payload.id} via l'événement ${event}`);
+      await db.collection('users').doc(memberId).set(userDocData, { merge: true });
+      console.log(`Synchronisation réussie pour le membre ${memberId} via l'événement ${event}`);
     } else if (event === "member.plan.added") {
-      // Lorsqu'un plan est ajouté, on s'assure de mettre à jour les informations de base puis on ajoute le nouveau plan
-      await db.collection('users').doc(payload.member.id).set(userDocData, { merge: true });
+      await db.collection('users').doc(memberId).set(userDocData, { merge: true });
       if (payload.planConnection) {
-        // Fonction utilitaire définie ci-dessous pour ajouter le plan dans le tableau
-        await addPlanConnection(payload.member.id, payload.planConnection);
-        console.log(`Plan ajouté pour le membre ${payload.member.id}`);
+        await addPlanConnection(memberId, payload.planConnection);
       }
+      console.log(`Plan ajouté pour le membre ${memberId}`);
     } else if (event === "member.plan.updated") {
-      await db.collection('users').doc(payload.member.id).set(userDocData, { merge: true });
+      await db.collection('users').doc(memberId).set(userDocData, { merge: true });
       if (payload.planConnection) {
-        await updatePlanConnection(payload.member.id, payload.planConnection);
-        console.log(`Plan mis à jour pour le membre ${payload.member.id}`);
+        await updatePlanConnection(memberId, payload.planConnection);
       } else if (payload.prevPlanConnection) {
-        await updatePlanConnection(payload.member.id, payload.prevPlanConnection);
-        console.log(`Plan (prev) mis à jour pour le membre ${payload.member.id}`);
+        await updatePlanConnection(memberId, payload.prevPlanConnection);
       }
+      console.log(`Plan mis à jour pour le membre ${memberId}`);
     } else if (event === "member.plan.canceled") {
-      await db.collection('users').doc(payload.member.id).set(userDocData, { merge: true });
+      await db.collection('users').doc(memberId).set(userDocData, { merge: true });
       if (payload.planConnection) {
-        await removePlanConnection(payload.member.id, payload.planConnection);
-        console.log(`Plan annulé pour le membre ${payload.member.id}`);
+        await removePlanConnection(memberId, payload.planConnection);
       }
+      console.log(`Plan annulé pour le membre ${memberId}`);
     } else if (event === "member.deleted") {
-      await db.collection('users').doc(payload.id).delete();
-      console.log(`Membre ${payload.id} supprimé via l'événement ${event}`);
+      await db.collection('users').doc(memberId).delete();
+      console.log(`Membre ${memberId} supprimé via l'événement ${event}`);
     } else {
       console.log(`Événement non géré : ${event}`);
     }
@@ -145,9 +118,13 @@ router.post('/memberstack', async (req, res) => {
   }
 });
 
-/**
- * Fonction utilitaire : Ajoute une planConnection au tableau 'plans'
- */
+// Fonctions utilitaires pour gérer le tableau "plans"
+async function getUserData(memberId) {
+  const docRef = db.collection('users').doc(memberId);
+  const snap = await docRef.get();
+  return snap.exists ? snap.data() : {};
+}
+
 async function addPlanConnection(memberId, planConnection) {
   const userData = await getUserData(memberId);
   const existingPlans = userData.plans || [];
@@ -155,9 +132,6 @@ async function addPlanConnection(memberId, planConnection) {
   await db.collection('users').doc(memberId).set({ plans: existingPlans }, { merge: true });
 }
 
-/**
- * Fonction utilitaire : Met à jour une planConnection existante dans le tableau 'plans'
- */
 async function updatePlanConnection(memberId, updatedPlan) {
   const userData = await getUserData(memberId);
   const existingPlans = userData.plans || [];
@@ -173,9 +147,6 @@ async function updatePlanConnection(memberId, updatedPlan) {
   await db.collection('users').doc(memberId).set({ plans: existingPlans }, { merge: true });
 }
 
-/**
- * Fonction utilitaire : Supprime une planConnection du tableau 'plans'
- */
 async function removePlanConnection(memberId, planConnection) {
   const userData = await getUserData(memberId);
   let existingPlans = userData.plans || [];
@@ -184,14 +155,6 @@ async function removePlanConnection(memberId, planConnection) {
       (p.planId && p.planId === planConnection.planId))
   );
   await db.collection('users').doc(memberId).set({ plans: existingPlans }, { merge: true });
-}
-
-/**
- * Fonction utilitaire : Récupère les données utilisateur ou un objet vide
- */
-async function getUserData(memberId) {
-  const doc = await db.collection('users').doc(memberId).get();
-  return doc.exists ? doc.data() : {};
 }
 
 module.exports = { router };
