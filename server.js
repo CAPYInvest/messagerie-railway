@@ -62,14 +62,14 @@ app.use('/api', authRoutes);
 // synchronisation des comptes MemberStack avec une base de données Firebase via Webhook memberstack
 //-------------------------------------------------------------------------------
 
-// Configuration des middlewares globaux
+// Middleware global pour parser le JSON et conserver le corps brut dans req.rawBody (au cas où)
 app.use(bodyParser.json({
   verify: (req, res, buf, encoding) => {
     req.rawBody = buf.toString(encoding || 'utf8');
   }
 }));
 
-// Importation du module de synchronisation webhook
+// Importation du module de synchronisation de webhooks
 const { router: webhookRouter } = require('./sync_memberstack_firebase');
 app.use('/api/webhook', webhookRouter);
 
