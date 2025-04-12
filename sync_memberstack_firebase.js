@@ -28,13 +28,6 @@ router.use(express.json());
  */
 router.post('/memberstack', async (req, res) => {
   try {
-    // Vérification simple du token webhook via l'en-tête "x-webhook-token"
-    const token = req.headers['x-webhook-token'];
-    if (process.env.MS_WEBHOOK_TOKEN && token !== process.env.MS_WEBHOOK_TOKEN) {
-      console.error("Token webhook invalide");
-      return res.status(401).send('Unauthorized: token invalid');
-    }
-    
     // Extraction de l'événement et du payload depuis le corps de la requête
     const event = req.body.event;
     const payload = req.body.payload;
@@ -43,15 +36,15 @@ router.post('/memberstack', async (req, res) => {
       return res.status(400).send("Payload invalide");
     }
     
-    // Récupération de l'e-mail : soit dans payload.auth.email, soit dans payload.email
+    // Extraction de l'email : soit dans payload.auth.email, sinon payload.email
     const email = (payload.auth && payload.auth.email) ? payload.auth.email : payload.email;
     
-    // Préparation de l'objet utilisateur à enregistrer dans Firestore. Pour les custom fields, on prend en compte ces 7 champs.
+    // Préparation de l'objet utilisateur à enregistrer dans Firestore
     const userData = {
       email: email,
       Adresse: payload.customFields && payload.customFields["Adresse"] ? payload.customFields["Adresse"] : null,
       CodePostal: payload.customFields && payload.customFields["Code postal"] ? payload.customFields["Code postal"] : null,
-      // Si "Nom" n'est pas défini, on peut utiliser "last-name" s'il existe, et pareil pour "Prénom" avec "first-name".
+      // Pour "Nom" et "Prénom", on teste d'abord s'ils existent directement ; sinon, on utilise "last-name" et "first-name"
       Nom: payload.customFields && payload.customFields["Nom"] ? payload.customFields["Nom"] : (payload.customFields && payload.customFields["last-name"] ? payload.customFields["last-name"] : null),
       Prenom: payload.customFields && payload.customFields["Prénom"] ? payload.customFields["Prénom"] : (payload.customFields && payload.customFields["first-name"] ? payload.customFields["first-name"] : null),
       Phone: payload.customFields && payload.customFields["Phone"] ? payload.customFields["Phone"] : null,
@@ -66,18 +59,17 @@ router.post('/memberstack', async (req, res) => {
         console.error("Email manquant dans le payload :", payload);
         return res.status(400).send("Email manquant dans le payload");
       }
-      // Création ou mise à jour du document dans Firestore avec l'ID du membre
+      // Création ou mise à jour du document dans Firestore, le document est identifié par payload.id
       await db.collection('users').doc(payload.id).set(userData, { merge: true });
       console.log(`Synchronisation réussie pour le membre ${payload.id} via l'événement ${event}`);
     } else if (event === "member.deleted") {
-      // Suppression du document correspondant dans Firestore
+      // Suppression du document dans Firestore
       await db.collection('users').doc(payload.id).delete();
       console.log(`Membre ${payload.id} supprimé via l'événement ${event}`);
     } else {
       console.log(`Événement non géré : ${event}`);
     }
     
-    // Réponse 200 pour indiquer que le webhook a été traité avec succès
     res.sendStatus(200);
   } catch (error) {
     console.error("Erreur lors du traitement du webhook MemberStack :", error);
