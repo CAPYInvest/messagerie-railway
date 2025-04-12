@@ -53,10 +53,11 @@ router.post('/memberstack', async (req, res) => {
     
     console.log("Webhook reçu. event =", event, " payload =", JSON.stringify(payload, null, 2));
 
-    if (!event || !payload || !payload.id) {
+    if (!event || !payload || (!payload.id && !(payload.member && payload.member.id))) {
       console.error("Payload invalide :", req.body);
       return res.status(400).send("Payload invalide");
     }
+    
     
     // Récupération de l'email : soit dans payload.auth.email, soit dans payload.email
     const email = (payload.auth && payload.auth.email) ? payload.auth.email : payload.email;
