@@ -138,6 +138,21 @@ function sanitizeString(str) {
 }
 
 
+// ------------------------------------------------------------------------------------
+// FONCTION GENERATION COMPTE RENDU VISIO AI
+// ------------------------------------------------------------------------------------
+
+// Dans server.js (après l'initialisation des autres routes)
+const callReportRouter = require('./callReport');
+app.use('/api/process-call-report', callReportRouter);
+
+
+
+
+
+
+
+
 
 
 
@@ -182,8 +197,6 @@ function formatTime(ts) {
   const ss = d.getSeconds().toString().padStart(2, '0');
   return `${hh}:${mm}:${ss}`;
 }
-
-
 
 
 
