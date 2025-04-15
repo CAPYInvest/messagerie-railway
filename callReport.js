@@ -29,7 +29,11 @@ if (!admin.apps.length) {
     storageBucket: "capy-invest.firebasestorage.app"
   });
 }
+
+
+// Définir le client Storage et Firestore
 const bucket = admin.storage().bucket();
+const db = admin.firestore();
 
 
 
