@@ -550,7 +550,7 @@ app.post('/api/create-room', requireAuth, async (req, res) => {
         enable_chat: false,
         start_video_off: (type === "audio"),
         start_audio_off: false,
-        exp: nowInSeconds + 3600   // Expire dans 1 heure
+        exp: nowInSeconds + 36000   // Expire dans 10 heure
       }
     };
 
@@ -792,10 +792,10 @@ app.get('/api/signed-url', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Chemin de fichier introuvable' });
     }
     
-    // Configurer l'URL signée (ici valable 1 heure)
+    // Configurer l'URL signée (ici valable 24 heure)
     const config = {
       action: 'read',
-      expires: Date.now() + 3600000 // 1 heure en millisecondes
+      expires: Date.now() + 43200000 // 24 heure en millisecondes
     };
     
     const [signedUrl] = await bucket.file(filePath).getSignedUrl(config);

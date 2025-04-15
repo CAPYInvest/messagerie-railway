@@ -31,9 +31,17 @@ if (!admin.apps.length) {
 }
 const bucket = admin.storage().bucket();
 
+
+
 //////////////////////////
 // Fonction pour sauvegarder le fichier audio dans Firebase Storage et renvoyer son URI gs://
 //////////////////////////
+/**
+ * Sauvegarde un fichier audio dans le dossier "temp_audio" du Storage et enregistre ses métadonnées dans Firestore.
+ * @param {Buffer} audioBuffer - Le buffer du fichier audio.
+ * @param {string} conversationId - ID unique de la conversation.
+ * @returns {Promise<string>} - URI gs:// du fichier sauvegardé.
+ */
 async function saveAudioToStorage(audioBuffer, conversationId) {
   const fileName = `temp_audio/${conversationId}_${Date.now()}.webm`;
   const file = bucket.file(fileName);
@@ -42,13 +50,36 @@ async function saveAudioToStorage(audioBuffer, conversationId) {
       contentType: "audio/webm",
     }
   });
-  // Générer une URL signée peut être utile pour le debug, mais pour l'API Google, on a besoin du gs:// URL
+  console.log(`[Server] Fichier audio sauvegardé sous ${fileName}`);
+  // Enregistrer les métadonnées dans la collection "audioRecordings"
+  await db.collection('audioRecordings').add({
+    conversationId,
+    fileName,
+    mimeType: "audio/webm",
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  });
   return `gs://${bucket.name}/${fileName}`;
 }
 
-//////////////////////////
-// Endpoint pour traiter le rapport
-//////////////////////////
+/**
+ * Sauvegarde les métadonnées du document de transcription dans la collection "transcriptions" de Firestore.
+ * @param {string} conversationId - ID de la conversation.
+ * @param {string} docFileName - Nom du fichier DOCX sauvegardé.
+ * @param {string} transcription - Texte de la transcription.
+ */
+async function saveTranscriptionMetadata(conversationId, docFileName, transcription) {
+  await db.collection('transcriptions').add({
+    conversationId,
+    fileName: docFileName,
+    transcription,
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+/**
+ * Endpoint pour recevoir un fichier audio et générer une transcription (au format DOCX).
+ * Pour les fichiers audio de plus d'une minute, on utilise longRunningRecognize.
+ */
 router.post('/', upload.single('audioFile'), async (req, res) => {
   try {
     const { conversationId, callerType } = req.body;
@@ -58,51 +89,27 @@ router.post('/', upload.single('audioFile'), async (req, res) => {
     console.log(`[Server] Fichier reçu pour conversation ${conversationId}, callerType: ${callerType}`);
     const audioBuffer = req.file.buffer;
 
-    // Pour déterminer la durée, on pourrait utiliser la taille du buffer ou analyser les métadonnées.
-    // Ici, nous supposerons qu'un fichier de plus de 60 secondes nécessitera LongRunningRecognize.
-    // Par exemple, vous pouvez définir un seuil de taille (en bytes) à vérifier.
-    // Pour l'exemple, on forcera toujours LongRunningRecognize.
-    const useLongRunning = true;
+    // Pour simplifier, on force ici l'utilisation de longRunningRecognize (adaptable selon la durée réelle)
+    const gsUri = await saveAudioToStorage(audioBuffer, conversationId);
+    console.log("[Server] URI gs:// du fichier audio :", gsUri);
 
-    let transcription = "";
-    if (useLongRunning) {
-      // Sauvegarder le fichier audio dans Storage et récupérer son URI gs://
-      const gsUri = await saveAudioToStorage(audioBuffer, conversationId);
-      console.log("[Server] Fichier audio sauvegardé dans Storage:", gsUri);
-
-      // Préparer la requête pour LongRunningRecognize avec l'URI
-      const requestSpeech = {
-        audio: { uri: gsUri },
-        config: {
-          encoding: 'WEBM_OPUS', // Adapter selon le format
-          sampleRateHertz: 48000,
-          languageCode: 'fr-FR',
-        },
-      };
-
-      console.log("[Server] Envoi du fichier audio à Google Speech-to-Text (Long Running)...");
-      const [operation] = await speechClient.longRunningRecognize(requestSpeech);
-      const [response] = await operation.promise();
-      transcription = response.results
-        .map(result => result.alternatives[0].transcript)
-        .join('\n');
-      console.log("[Server] Transcription obtenue :", transcription);
-    } else {
-      // Si le fichier était court, on utiliserait la méthode synchrone (ce bloc est rarement atteint ici)
-      const audio = { content: audioBuffer.toString('base64') };
-      const config = {
-        encoding: 'WEBM_OPUS',
-        sampleRateHertz: 48000,
+    // Préparer la requête pour longRunningRecognize
+    const requestSpeech = {
+      audio: { uri: gsUri },
+      config: {
+        encoding: 'WEBM_OPUS', // Adaptez en fonction du format réel de votre audio
+        sampleRateHertz: 48000, // Ajustez selon votre source audio
         languageCode: 'fr-FR',
-      };
-      const requestSpeech = { audio, config };
-      console.log("[Server] Envoi de l'audio à Google Speech-to-Text (Sync)...");
-      const [response] = await speechClient.recognize(requestSpeech);
-      transcription = response.results
-        .map(result => result.alternatives[0].transcript)
-        .join('\n');
-      console.log("[Server] Transcription obtenue :", transcription);
-    }
+      },
+    };
+
+    console.log("[Server] Envoi du fichier audio à Google Speech-to-Text (Long Running)...");
+    const [operation] = await speechClient.longRunningRecognize(requestSpeech);
+    const [response] = await operation.promise();
+    const transcription = response.results
+      .map(result => result.alternatives[0].transcript)
+      .join('\n');
+    console.log("[Server] Transcription obtenue :", transcription);
 
     // Générer un document DOCX avec la transcription
     const doc = new Document({
@@ -124,8 +131,8 @@ router.post('/', upload.single('audioFile'), async (req, res) => {
     });
     const docBuffer = await Packer.toBuffer(doc);
 
-    // Stocker le document DOCX dans Firebase Storage
-    const docFileName = `call_reports/${conversationId}_${Date.now()}.docx`;
+    // Renommer le dossier de transcription en "transcriptions" (au lieu de "call_reports")
+    const docFileName = `transcriptions/${conversationId}_${Date.now()}.docx`;
     const docFile = bucket.file(docFileName);
     await docFile.save(docBuffer, {
       metadata: {
@@ -133,6 +140,10 @@ router.post('/', upload.single('audioFile'), async (req, res) => {
       }
     });
     console.log(`[Server] Document DOCX sauvegardé sous ${docFileName}`);
+    
+    // Enregistrer les métadonnées de la transcription dans la collection "transcriptions"
+    await saveTranscriptionMetadata(conversationId, docFileName, transcription);
+    
     res.json({ success: true, docFileName, transcription });
   } catch (error) {
     console.error("[Server] Erreur lors du traitement du rapport :", error);
@@ -140,7 +151,9 @@ router.post('/', upload.single('audioFile'), async (req, res) => {
   }
 });
 
-// Endpoint pour générer une URL signé pour télécharger le document (pour tests ou interface plus tard)
+/**
+ * Endpoint pour générer une URL signée pour télécharger le document généré.
+ */
 router.get('/download-call-report', async (req, res) => {
   try {
     const { fileName } = req.query;
