@@ -15,7 +15,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 const serviceAccount = JSON.parse(process.env.GOOGLE_SPEECH_TO_TEXT_SERVICE_ACCOUNT);
 serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
 
-const speechClient = new SpeechClient({ credentials: gService, projectId: gService.project_id });
+const speechClient = new SpeechClient({
+  credentials: serviceAccount,
+  projectId:  serviceAccount.project_id
+});
 
 
 // Assurez-vous que Firebase Admin est initialisé (voir votre code existant)
@@ -128,4 +131,3 @@ router.get('/download-call-report', async (req, res) => {
 
 module.exports = router;
 
-module.exports = router;
