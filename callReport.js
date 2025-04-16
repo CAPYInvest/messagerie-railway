@@ -36,96 +36,94 @@ if (!admin.apps.length) {
 const bucket = admin.storage().bucket();
 const db = admin.firestore();
 
-
-// Sauvegarde du buffer audio et métadonnées
-async function saveAudioToStorage(audioBuffer, conversationId) {
-  const fileName = `temp_audio/${conversationId}_${Date.now()}.webm`;
-  const file = bucket.file(fileName);
-  await file.save(audioBuffer, { metadata: { contentType: "audio/webm" } });
-  console.log(`[Server] Audio sauvegardé sous ${fileName}`);
-  await db.collection('audioRecordings').add({
-    conversationId, fileName, mimeType: "audio/webm",
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-  return `gs://${bucket.name}/${fileName}`;
-}
-
-// Enregistre métadonnées de transcription
-async function saveTranscriptionMetadata(conversationId, docFileName, transcription) {
-  await db.collection('transcriptions').add({
-    conversationId, fileName: docFileName, transcription,
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-}
-
-// POST /call-report
-router.post('/', upload.single('audioFile'), async (req, res) => {
+router.post("/", express.json(), async (req, res) => {
   try {
-    const { conversationId, callerType } = req.body;
-    if (!req.file) return res.status(400).json({ error: 'Aucun fichier audio reçu.' });
-    console.log(`[Server] Reçu audio pour conversation ${conversationId}, callerType=${callerType}`);
+    const { conversationId, instanceId } = req.body;
+    if (!conversationId || !instanceId) {
+      return res.status(400).json({ error: "conversationId et instanceId requis" });
+    }
 
-    // Stocke l’audio
-    const gsUri = await saveAudioToStorage(req.file.buffer, conversationId);
+    // 1) Récupère la liste des fichiers de cet enregistrement
+    const DAILY_KEY = process.env.DAILY_API_KEY;
+    const rec = await axios.get(
+      `https://api.daily.co/v1/recordings/instances/${instanceId}`,
+      { headers: { Authorization: `Bearer ${DAILY_KEY}` } }
+    );
+    const files = rec.data.recording.files || [];
+    const audioFile = files.find(f => f.fileType === "audio_only" || f.fileMimeType.startsWith("audio/"));
+    if (!audioFile) {
+      return res.status(500).json({ error: "Aucun fichier audio trouvé dans cette instance." });
+    }
 
-    // Prépare et lance la transcription asynchrone
-    const requestSpeech = {
+    // 2) Télécharge cet URL en Buffer
+    const audioResp = await axios.get(audioFile.url, { responseType: "arraybuffer" });
+    const audioBuffer = Buffer.from(audioResp.data);
+
+    // 3) Sauvegarde dans Firebase Storage / Firestore
+    const tempName = `temp_audio/${conversationId}_${Date.now()}.webm`;
+    const fileRef  = bucket.file(tempName);
+    await fileRef.save(audioBuffer, { metadata:{ contentType: audioFile.fileMimeType } });
+    await db.collection("audioRecordings").add({
+      conversationId, fileName: tempName,
+      mimeType: audioFile.fileMimeType,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // 4) Transcription longue via URI gs://
+    const gsUri = `gs://${bucket.name}/${tempName}`;
+    const [op] = await speechClient.longRunningRecognize({
       audio: { uri: gsUri },
-      config: { encoding: 'WEBM_OPUS', sampleRateHertz: 48000, languageCode: 'fr-FR' },
-    };
-    console.log("[Server] Envoi à Google Speech-to-Text longRunningRecognize...");
-    const [operation] = await speechClient.longRunningRecognize(requestSpeech);
-    const [response] = await operation.promise();
-    const transcription = response.results
-      .map(r => r.alternatives[0].transcript).join('\n');
-    console.log("[Server] Transcription obtenue.");
+      config: { encoding:"WEBM_OPUS", sampleRateHertz:48000, languageCode:"fr-FR" }
+    });
+    const [speechResponse] = await op.promise();
+    const transcription = speechResponse.results
+      .map(r => r.alternatives[0].transcript).join("\n");
 
-    // Génère le DOCX
+    // 5) Génère le DOCX
     const doc = new Document({
-      sections: [{
-        children: [
+      sections:[{
+        children:[
           new Paragraph({
-            children: [
-              new TextRun({ text: "Compte Rendu de l'Appel", bold: true, size: 28 }),
-              new TextRun({ text: `\nConversation ID: ${conversationId}\n`, bold: true, size: 24 }),
-            ],
+            children:[
+              new TextRun({ text:"Compte Rendu de l'Appel", bold:true, size:28 }),
+              new TextRun({ text:`\nConversation ID: ${conversationId}\n`, bold:true, size:24 })
+            ]
           }),
-          new Paragraph({ children: [ new TextRun({ text: transcription, size: 24 }) ] }),
+          new Paragraph({ children:[ new TextRun({ text:transcription, size:24 }) ]})
         ]
       }]
     });
     const docBuffer = await Packer.toBuffer(doc);
-
-    // Sauvegarde dans "transcriptions/"
-    const docFileName = `transcriptions/${conversationId}_${Date.now()}.docx`;
-    const docFile = bucket.file(docFileName);
-    await docFile.save(docBuffer, {
-      metadata: { contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }
+    const docName = `transcriptions/${conversationId}_${Date.now()}.docx`;
+    const docRef  = bucket.file(docName);
+    await docRef.save(docBuffer, {
+      metadata:{ contentType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" }
     });
-    console.log(`[Server] DOCX sauvegardé sous ${docFileName}`);
+    await db.collection("transcriptions").add({
+      conversationId, fileName:docName, transcription,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
 
-    await saveTranscriptionMetadata(conversationId, docFileName, transcription);
-
-    return res.json({ success: true, docFileName, transcription });
-  } catch (error) {
-    console.error("[Server] Erreur callReport:", error);
-    return res.status(500).json({ error: "Erreur interne lors du traitement du rapport." });
+    return res.json({ success:true, docFileName:docName });
+  } catch (err) {
+    console.error("[Server] call-report error:", err);
+    return res.status(500).json({ error:"Erreur interne lors du traitement du rapport." });
   }
 });
 
-// GET /call-report/download-call-report?fileName=...
-router.get('/download-call-report', async (req, res) => {
+// GET /api/call-report/download-call-report
+router.get("/download-call-report", async (req, res) => {
   try {
     const { fileName } = req.query;
-    if (!fileName) return res.status(400).json({ error: "Paramètre 'fileName' requis" });
+    if (!fileName) return res.status(400).json({ error:"fileName requis" });
     const file = bucket.file(fileName);
-    const options = { version: 'v4', action: 'read', expires: Date.now() + 15*60*1000 };
-    const [signedUrl] = await file.getSignedUrl(options);
-    console.log(`[Server] Signed URL pour ${fileName}: ${signedUrl}`);
-    return res.json({ url: signedUrl });
-  } catch (error) {
-    console.error("[Server] Erreur génération lien signé:", error);
-    return res.status(500).json({ error: "Erreur interne lors de la génération du lien de téléchargement." });
+    const [url] = await file.getSignedUrl({
+      version: "v4", action:"read", expires: Date.now()+15*60*1000
+    });
+    return res.json({ url });
+  } catch (err) {
+    console.error("[Server] download error:", err);
+    return res.status(500).json({ error:"Impossible de générer le lien." });
   }
 });
 
