@@ -550,7 +550,8 @@ app.post('/api/create-room', requireAuth, async (req, res) => {
         enable_chat: false,
         start_video_off: (type === "audio"),
         start_audio_off: false,
-        exp: nowInSeconds + 36000   // Expire dans 10 heure
+        exp: nowInSeconds + 36000,   // Expire dans 10 heure
+        enable_recording: "cloud",
       }
     };
 
