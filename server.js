@@ -546,7 +546,6 @@ app.post('/api/create-room', requireAuth, async (req, res) => {
     // Ici, on coupe la vidéo au démarrage si c'est un appel audio.
     const roomOptions = {
       properties: {
-        enable_recording: "cloud",
         enable_screenshare: false,
         enable_chat: false,
         start_video_off: (type === "audio"),
