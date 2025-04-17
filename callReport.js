@@ -107,14 +107,25 @@ async function generateDocx(sections, destPath) {
 
 async function summarizeText(text) {
   console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI`);
-  const response = await vertex.preview.generateContent({
-    model: 'models/gemini-2.0-flash-lite',
-    contents: [{ role: 'user', parts: [{ text: `Résume en français :\n${text}` }] }]
+  const genModel = vertex.preview.getGenerativeModel({
+    model: 'models/gemini-2.0-flash-lite'
   });
-  const summary = response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const resp = await genModel.generateContent({
+    contents: [{
+      role: 'user',
+      parts: [{ text: `Résume en français :\n${text}` }]
+    }]
+  });
+  const summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
   console.log('[callReport] Summary received (length=', summary.length, ')');
   return summary;
 }
+
+
+
+//--------------------------------------------------------
+// ---------- Route principale ----------
+//--------------------------------------------------------
 
 router.post('/', async (req, res) => {
   try {
@@ -164,7 +175,11 @@ router.post('/', async (req, res) => {
     });
 
     console.log('[callReport] All steps completed successfully');
-    res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: summaryPath });
+    res.json({
+      success: true,
+      transcriptionDoc: txtPath,
+      summaryDoc: summaryPath
+    });
 
   } catch (err) {
     console.error('[callReport] ERROR', err);
