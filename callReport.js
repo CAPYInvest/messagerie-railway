@@ -111,19 +111,32 @@ async function generateDocx(sections, path) {
   await saveBuffer(buf, path, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 }
 
-// Summarization using GoogleGenAI
+// Summarization using GoogleGenAI with structured JSON output
 async function summarizeText(text) {
-  console.log('[callReport] Summarizing via GoogleGenAI');
-  const prompt = `A partir de cette transcription, génère un Rapport / Compte rendu de réunion académique avec date du jour:\n${text}`;
+  console.log('[callReport] Summarizing via GoogleGenAI with structured format');
+  const prompt = `Tu es un assistant expert en rédaction de comptes rendus. À partir de cette transcription, génère un rapport structuré au format JSON avec les clés suivantes :
+` +
+    `titre: chaîne, date: chaîne (format JJ MMMM YYYY), objet: chaîne, participants: liste de chaînes, pointsCles: liste de chaînes, prochainesEtapes: liste de chaînes, conclusion: chaîne.
+` +
+    `Transcription :
+${text}`;
   const msg = { text: prompt };
   const chat = ai.chats.create({ model: 'gemini-2.0-flash-001', config: generationConfig });
-  let summary = '';
+  let result = '';
   for await (const chunk of await chat.sendMessageStream({ message: msg })) {
-    if (chunk.text) summary += chunk.text;
+    if (chunk.text) result += chunk.text;
   }
-  if (!summary) summary = text;
-  return summary;
+  console.log('[callReport] Raw structured summary =', result);
+  let data;
+  try {
+    data = JSON.parse(result);
+  } catch (e) {
+    console.warn('[callReport] JSON parsing failed, using fallback summary');
+    data = { titre: 'Compte Rendu', date: new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' }), objet: '', participants: [], pointsCles: [], prochainesEtapes: [], conclusion: result };
+  }
+  return data;
 }
+
 
 // Main route
 router.post('/', async (req, res) => {
