@@ -111,7 +111,7 @@ async function generateDocx(sections, destPath) {
 
 async function summarizeText(text) {
   console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI`);
-  const genModel = vertex.preview.getGenerativeModel({ model: 'models/gemini-2.0-flash-lite' });
+  const genModel = vertex.preview.getGenerativeModel({ model: 'models/text-bison-001' }); // switched to text-bison-001 for better quality/cost
   const resp = await genModel.generateContent({ contents: [{ role: 'user', parts: [{ text: `Résume en français :\n${text}` }] }] });
   console.log('[callReport] Raw summary candidates =', JSON.stringify(resp.candidates));
   let summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
