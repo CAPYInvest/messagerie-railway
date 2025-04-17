@@ -144,7 +144,7 @@ function sanitizeString(str) {
 
 // Dans server.js (après l'initialisation des autres routes)
 const callReportRouter = require('./callReport');
-app.use('/api/process-call-report', callReportRouter);
+app.use('/api/process-daily-recording', callReportRouter);
 
 
 
