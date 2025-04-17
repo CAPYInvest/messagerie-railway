@@ -110,10 +110,18 @@ async function generateDocx(sections, destPath) {
 }
 
 async function summarizeText(text) {
-  console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI`);
-  const genModel = vertex.preview.getGenerativeModel({ model: 'models/text-bison-001' }); // switched to text-bison-001 for better quality/cost
-  const resp = await genModel.generateContent({ contents: [{ role: 'user', parts: [{ text: `Résume en français :\n${text}` }] }] });
+  console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI using Gemini Flash`);
+  // Choix du modèle Gemini Flash pour un bon ratio qualité/coût
+  const genModel = vertex.preview.getGenerativeModel({ model: 'models/gemini-2.0-flash' });
+  // Construction du prompt avec message système et utilisateur
+  const contents = [
+    { role: 'system', parts: [ { text: 'Tu es un assistant formel et académique. Génère un résumé concis et clair du dialogue suivant.' } ] },
+    { role: 'user', parts: [ { text: `Dialogue :
+${text}` } ] }
+  ];
+  const resp = await genModel.generateContent({ contents });
   console.log('[callReport] Raw summary candidates =', JSON.stringify(resp.candidates));
+  // Extraction du résumé ou fallback
   let summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
   if (!summary) {
     console.log('[callReport] Summary empty, using transcription as fallback');
