@@ -159,43 +159,50 @@ router.post('/', async (req, res) => {
     console.log('[callReport] Request', req.body);
     if (!recordingId || !conversationId) return res.status(400).json({ error: 'Missing data' });
 
-    // wait and download
     await waitReady(recordingId);
-    const dl = await getDownloadLink(recordingId);
-    const bufAudio = await downloadBuffer(dl);
-
-    // store raw audio
+    const downloadUrl = await getDownloadLink(recordingId);
+    const audioBuf = await downloadBuffer(downloadUrl);
     const audioPath = `temp_audio/${conversationId}_${Date.now()}.webm`;
-    const gsAudio = await saveBuffer(bufAudio, audioPath, 'audio/webm');
+    const gsAudio = await saveBuffer(audioBuf, audioPath, 'audio/webm');
     await db.collection('audioRecordings').add({ conversationId, fileName: audioPath, mimeType: 'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    // transcription
     const transcription = await transcribe(gsAudio);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{
-      children: [
-        new Paragraph({ text: 'Transcription brute', heading: HeadingLevel.HEADING_2 }),
-        new Paragraph({ text: `Conversation ID : ${conversationId}`, spacing: { after: 200 } }),
-        new Paragraph({ text: transcription })
-      ]
-    }], txtPath);
+    await generateDocx([{ children: [ new Paragraph({ text: 'Transcription', heading: HeadingLevel.HEADING_2 }), new Paragraph({ text: transcription }) ] }], txtPath);
     await db.collection('transcriptions').add({ conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    // summarize
-    const summary = await summarizeText(transcription);
-    // format date for filename and doc
-    const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
-    const safeDate = today.replace(/\s+/g, '_');
+    const reportData = await summarizeText(transcription);
+    const safeDate = reportData.date.replace(/\s+/g, '_');
     const summaryPath = `Rapport_Daily_AI/Rapport_du_${safeDate}_${conversationId}.docx`;
-
-    await generateDocx([{
-      children: [
-        new Paragraph({ text: `Compte Rendu du ${today}`, heading: HeadingLevel.TITLE, thematicBreak: true }),
-        new Paragraph({ text: `Conversation ID : ${conversationId}`, spacing: { after: 300 } }),
-        new Paragraph({ text: summary })
-      ]
-    }], summaryPath);
-    await db.collection('Rapport_Daily_AI').add({ conversationId, fileName: summaryPath, summary, consent: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    const sections = [
+      { children: [
+          new Paragraph({ text: reportData.titre || `Compte Rendu du ${reportData.date}`, heading: HeadingLevel.TITLE }),
+          new Paragraph({ text: `Date : ${reportData.date}`, spacing: { after: 300 } }),
+          new Paragraph({ text: `Objet : ${reportData.objet}`, heading: HeadingLevel.HEADING_2 }),
+          new Paragraph({ text: 'Participants :', heading: HeadingLevel.HEADING_3 }),
+          ...reportData.participants.map(p => new Paragraph({ text: p, bullet: { level: 0 } })),
+          new Paragraph({ text: 'Points Clés :', heading: HeadingLevel.HEADING_3 }),
+          ...reportData.pointsCles.map(pc => new Paragraph({ text: pc, bullet: { level: 0 } })),
+          new Paragraph({ text: 'Prochaines Étapes :', heading: HeadingLevel.HEADING_3 }),
+          ...reportData.prochainesEtapes.map(pe => new Paragraph({ text: pe, bullet: { level: 0 } })),
+          new Paragraph({ text: 'Conclusion :', heading: HeadingLevel.HEADING_3, spacing: { before: 200 } }),
+          new Paragraph({ text: reportData.conclusion })
+        ]
+      }
+    ];
+    await generateDocx(sections, summaryPath);
+    await db.collection('Rapport_Daily_AI').add({
+      conversationId,
+      fileName: summaryPath,
+      summary: reportData.conclusion,
+      date: reportData.date,
+      objet: reportData.objet,
+      participants: reportData.participants,
+      pointsCles: reportData.pointsCles,
+      prochainesEtapes: reportData.prochainesEtapes,
+      consent: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
 
     console.log('[callReport] Success');
     res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: summaryPath });
@@ -204,5 +211,6 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 module.exports = router;
