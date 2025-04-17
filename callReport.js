@@ -4,22 +4,42 @@ const fs = require('fs');
 const express = require('express');
 const axios   = require('axios');
 const { SpeechClient } = require('@google-cloud/speech');
-const { VertexAI }     = require('@google-cloud/vertexai');
+const { GoogleGenAI } = require('@google/genai');
 const admin   = require('firebase-admin');
 const { Document, Packer, Paragraph, TextRun } = require('docx');
 
-// Si clé Vertex AI passée en JSON, on l'écrit dans un fichier et on configure ADC
+// Auth GoogleGenAI via ADC
 if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
-  const vertexCreds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
+  const creds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
   const tmpPath = '/tmp/vertex-service-account.json';
-  fs.writeFileSync(tmpPath, JSON.stringify(vertexCreds));
+  fs.writeFileSync(tmpPath, JSON.stringify(creds));
   process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
-  console.log(`[callReport] Wrote Vertex AI creds to ${tmpPath}`);
+  console.log(`[callReport] Wrote AI creds to ${tmpPath}`);
 }
+
+// Init GenAI client
+const ai = new GoogleGenAI({
+  vertexai: true,
+  project : process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
+  location: process.env.GOOGLE_VERTEX_AI_LOCATION
+});
+// Generation configuration
+const generationConfig = {
+  maxOutputTokens: 8192,
+  temperature: 1,
+  topP: 0.95,
+  responseModalities: ["TEXT"],
+  safetySettings: [
+    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'OFF' },
+    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'OFF' },
+    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'OFF' },
+    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'OFF' }
+  ]
+};
 
 const router = express.Router();
 
-// ---------- Init Firebase Admin ----------
+// Init Firebase Admin
 const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 fbCred.private_key = fbCred.private_key.replace(/\\n/g, '\n');
 if (!admin.apps.length) {
@@ -31,145 +51,108 @@ if (!admin.apps.length) {
 const bucket = admin.storage().bucket();
 const db     = admin.firestore();
 
-// ---------- Init Speech‐to‐Text ----------
+// Init Speech-to-Text
 const stCred = JSON.parse(process.env.GOOGLE_SPEECH_TO_TEXT_SERVICE_ACCOUNT);
 stCred.private_key = stCred.private_key.replace(/\\n/g, '\n');
 const speechClient = new SpeechClient({
   credentials: stCred,
-  projectId: stCred.project_id,
+  projectId: stCred.project_id
 });
 
-// ---------- Init Vertex AI (ADC) ----------
-console.log("[callReport] Vertex AI init: project=", process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-            "location=", process.env.GOOGLE_VERTEX_AI_LOCATION);
-const vertex = new VertexAI({
-  project : process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-  location: process.env.GOOGLE_VERTEX_AI_LOCATION || 'us-central1'
-});
-
-// ---------- Helpers ----------
+// Helper: Poll until recording is ready
 async function waitReady(recId, maxTries = 10, delayMs = 6000) {
   console.log(`[callReport] Waiting for recording ${recId} to be ready...`);
   const headers = { Authorization: `Bearer ${process.env.DAILY_API_KEY}` };
   for (let i = 0; i < maxTries; i++) {
-    const { data } = await axios.get(
-      `https://api.daily.co/v1/recordings/${recId}`, { headers }
-    );
+    const { data } = await axios.get(`https://api.daily.co/v1/recordings/${recId}`, { headers });
     console.log(`[callReport] Try ${i+1}/${maxTries}, status=`, data.status);
-    if (data.status === 'ready' || data.status === 'finished') {
-      console.log(`[callReport] Recording ${recId} is ready.`);
-      return data;
-    }
+    if (data.status === 'ready' || data.status === 'finished') return;
     await new Promise(r => setTimeout(r, delayMs));
   }
-  throw new Error('Enregistrement Daily toujours en cours après délai.');
+  throw new Error('Recording not ready after timeout');
 }
 
+// Helper: get signed download link
 async function getDownloadLink(recId) {
-  console.log(`[callReport] Generating download link for ${recId}`);
+  console.log(`[callReport] Generating download link`);
   const headers = { Authorization: `Bearer ${process.env.DAILY_API_KEY}` };
-  const { data } = await axios.get(
-    `https://api.daily.co/v1/recordings/${recId}/access-link`, { headers }
-  );
-  console.log(`[callReport] Download link generated.`);
+  const { data } = await axios.get(`https://api.daily.co/v1/recordings/${recId}/access-link`, { headers });
   return data.download_link;
 }
 
+// Helper: download binary
 async function downloadBuffer(url) {
-  console.log(`[callReport] Downloading audio buffer from URL`);
+  console.log(`[callReport] Downloading audio buffer`);
   const resp = await axios.get(url, { responseType: 'arraybuffer' });
   return Buffer.from(resp.data);
 }
 
-async function saveToStorage(buffer, path, contentType) {
-  console.log(`[callReport] Saving to storage at ${path}`);
+// Helper: save buffer to Firebase Storage
+async function saveBuffer(buffer, path, contentType) {
+  console.log(`[callReport] Saving ${path}`);
   const file = bucket.file(path);
   await file.save(buffer, { metadata: { contentType } });
   return `gs://${bucket.name}/${path}`;
 }
 
+// Transcription
 async function transcribe(gsUri) {
-  console.log(`[callReport] Starting transcription for ${gsUri}`);
+  console.log(`[callReport] Transcribing ${gsUri}`);
   const [op] = await speechClient.longRunningRecognize({
     audio: { uri: gsUri },
-    config: { encoding: 'WEBM_OPUS', sampleRateHertz: 48000, languageCode: 'fr-FR' },
+    config: { encoding: 'WEBM_OPUS', sampleRateHertz: 48000, languageCode: 'fr-FR' }
   });
   const [res] = await op.promise();
-  const text = res.results.map(r => r.alternatives[0].transcript).join('\n');
-  console.log(`[callReport] Transcription completed (length=${text.length})`);
-  return text;
+  return res.results.map(r => r.alternatives[0].transcript).join('\n');
 }
 
-async function generateDocx(sections, destPath) {
-  console.log(`[callReport] Generating DOCX at ${destPath}`);
-  const doc = new Document({ sections });
-  const buffer = await Packer.toBuffer(doc);
-  await saveToStorage(buffer, destPath,
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  );
+// Generate DOCX
+async function generateDocx(contentSections, path) {
+  console.log(`[callReport] Generating DOCX ${path}`);
+  const doc = new Document({ sections: contentSections });
+  const buf = await Packer.toBuffer(doc);
+  await saveBuffer(buf, path, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 }
 
+// Summarization using GoogleGenAI
 async function summarizeText(text) {
-  console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI using Gemini Flash`);
-  // Choix du modèle Gemini Flash
-  const genModel = vertex.preview.getGenerativeModel({ model: 'models/gemini-2.0-flash' });
-  // Construction du prompt
-  const prompt = `Tu es un assistant formel et académique. Génère un résumé concis et clair du dialogue suivant :
-${text}`;
-  // Appel generateContent avec role 'user'
-  const resp = await genModel.generateContent({
-    contents: [
-      { role: 'user', parts: [ { text: prompt } ] }
-    ]
-  });
-  console.log('[callReport] Raw summary candidates =', JSON.stringify(resp.candidates));
-  // Extraction du résumé ou fallback
-  let summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  if (!summary) {
-    console.log('[callReport] Summary empty, using transcription as fallback');
-    summary = text;
+  console.log('[callReport] Summarizing via GoogleGenAI');
+  const prompt = `A partir de cette transcription, génère un Rapport / Compte rendu de réunion académique avec date du jour:\n${text}`;
+  const msg = { text: prompt };
+  const chat = ai.chats.create({ model: 'gemini-2.0-flash-001', config: generationConfig });
+  let summary = '';
+  for await (const chunk of await chat.sendMessageStream({ message: msg })) {
+    if (chunk.text) summary += chunk.text;
   }
-  console.log('[callReport] Summary received (length=', summary.length, ')');
+  if (!summary) summary = text;
   return summary;
 }
 
-
-// ---------- Route principale ----------
+// Main route
 router.post('/', async (req, res) => {
   try {
     const { recordingId, conversationId } = req.body;
-    console.log('[callReport] Received request', req.body);
-    if (!recordingId || !conversationId) {
-      return res.status(400).json({ error: 'recordingId et conversationId requis' });
-    }
+    console.log('[callReport] Request', req.body);
+    if (!recordingId || !conversationId) return res.status(400).json({ error: 'Missing data' });
+
     await waitReady(recordingId);
-    const downloadUrl = await getDownloadLink(recordingId);
-    const audioBuf = await downloadBuffer(downloadUrl);
+    const dl = await getDownloadLink(recordingId);
+    const bufAudio = await downloadBuffer(dl);
     const audioPath = `temp_audio/${conversationId}_${Date.now()}.webm`;
-    const gsUri = await saveToStorage(audioBuf, audioPath, 'audio/webm');
+    const gsAudio = await saveBuffer(bufAudio, audioPath, 'audio/webm');
     await db.collection('audioRecordings').add({ conversationId, fileName: audioPath, mimeType: 'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    const transcription = await transcribe(gsUri);
+    const transcription = await transcribe(gsAudio);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{
-      children: [
-        new Paragraph({ children:[ new TextRun({ text: 'Transcription brute', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }),
-        new Paragraph({ children:[ new TextRun(transcription) ] })
-      ]
-    }], txtPath);
+    await generateDocx([{ children: [ new Paragraph({ children: [ new TextRun({ text: 'Transcription brute', bold: true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }), new Paragraph({ children: [ new TextRun(transcription) ] }) ] }], txtPath);
     await db.collection('transcriptions').add({ conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     const summary = await summarizeText(transcription);
     const summaryPath = `Rapport_Daily_AI/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{
-      children: [
-        new Paragraph({ children:[ new TextRun({ text: 'Résumé IA', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }),
-        new Paragraph({ children:[ new TextRun(summary) ] })
-      ]
-    }], summaryPath);
+    await generateDocx([{ children: [ new Paragraph({ children: [ new TextRun({ text: 'Résumé IA', bold: true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }), new Paragraph({ children: [ new TextRun(summary) ] }) ] }], summaryPath);
     await db.collection('Rapport_Daily_AI').add({ conversationId, fileName: summaryPath, summary, consent: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    console.log('[callReport] All steps completed successfully');
+    console.log('[callReport] Success');
     res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: summaryPath });
   } catch (err) {
     console.error('[callReport] ERROR', err);
