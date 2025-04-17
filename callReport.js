@@ -1,5 +1,6 @@
 // callReport.js
 require('dotenv').config();
+const fs = require('fs');
 const express = require('express');
 const axios   = require('axios');
 const { SpeechClient } = require('@google-cloud/speech');
@@ -7,15 +8,24 @@ const { VertexAI }     = require('@google-cloud/vertexai');
 const admin   = require('firebase-admin');
 const { Document, Packer, Paragraph, TextRun } = require('docx');
 
+// Si clé Vertex AI passée en JSON, on l'écrit dans un fichier et on configure ADC
+if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
+  const vertexCreds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
+  const tmpPath = '/tmp/vertex-service-account.json';
+  fs.writeFileSync(tmpPath, JSON.stringify(vertexCreds));
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
+  console.log(`[callReport] Wrote Vertex AI creds to ${tmpPath}`);
+}
+
 const router = express.Router();
 
 // ---------- Init Firebase Admin ----------
 const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-fbCred.private_key = fbCred.private_key.replace(/\n/g, '');
+fbCred.private_key = fbCred.private_key.replace(/\\n/g, '\n');
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(fbCred),
-    storageBucket: process.env.FIREBASE_BUCKET    // ex: "capy-invest.appspot.com"
+    storageBucket: process.env.FIREBASE_BUCKET
   });
 }
 const bucket = admin.storage().bucket();
@@ -29,17 +39,15 @@ const speechClient = new SpeechClient({
   projectId: stCred.project_id,
 });
 
-// ---------- Init Vertex AI (env vars updated) ----------
+// ---------- Init Vertex AI (ADC) ----------
 console.log("[callReport] Vertex AI init: project=", process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-            "region=", process.env.GOOGLE_VERTEX_AI_LOCATION);
+            "location=", process.env.GOOGLE_VERTEX_AI_LOCATION);
 const vertex = new VertexAI({
   project : process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-  location: process.env.GOOGLE_VERTEX_AI_LOCATION || 'us-central1',
-  credentials: JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT)
+  location: process.env.GOOGLE_VERTEX_AI_LOCATION || 'us-central1'
 });
 
 // ---------- Helpers ----------
-
 async function waitReady(recId, maxTries = 10, delayMs = 6000) {
   console.log(`[callReport] Waiting for recording ${recId} to be ready...`);
   const headers = { Authorization: `Bearer ${process.env.DAILY_API_KEY}` };
@@ -84,11 +92,7 @@ async function transcribe(gsUri) {
   console.log(`[callReport] Starting transcription for ${gsUri}`);
   const [op] = await speechClient.longRunningRecognize({
     audio: { uri: gsUri },
-    config: {
-      encoding: 'WEBM_OPUS',
-      sampleRateHertz: 48000,
-      languageCode: 'fr-FR',
-    },
+    config: { encoding: 'WEBM_OPUS', sampleRateHertz: 48000, languageCode: 'fr-FR' },
   });
   const [res] = await op.promise();
   const text = res.results.map(r => r.alternatives[0].transcript).join('\n');
@@ -107,29 +111,17 @@ async function generateDocx(sections, destPath) {
 
 async function summarizeText(text) {
   console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI`);
-  const genModel = vertex.preview.getGenerativeModel({
-    model: 'models/gemini-2.0-flash-lite'
-  });
-  const resp = await genModel.generateContent({
-    contents: [{
-      role: 'user',
-      parts: [{ text: `Résume en français :\n${text}` }]
-    }]
-  });
+  const genModel = vertex.preview.getGenerativeModel({ model: 'models/gemini-2.0-flash-lite' });
+  const resp = await genModel.generateContent({ contents: [{ role: 'user', parts: [{ text: `Résume en français :\n${text}` }] }] });
   const summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
   console.log('[callReport] Summary received (length=', summary.length, ')');
   return summary;
 }
 
-
-
-//--------------------------------------------------------
 // ---------- Route principale ----------
-//--------------------------------------------------------
-
 router.post('/', async (req, res) => {
   try {
-    const { recordingId, conversationId, callerType } = req.body;
+    const { recordingId, conversationId } = req.body;
     console.log('[callReport] Received request', req.body);
     if (!recordingId || !conversationId) {
       return res.status(400).json({ error: 'recordingId et conversationId requis' });
@@ -140,46 +132,20 @@ router.post('/', async (req, res) => {
     const audioBuf = await downloadBuffer(downloadUrl);
     const audioPath = `temp_audio/${conversationId}_${Date.now()}.webm`;
     const gsUri = await saveToStorage(audioBuf, audioPath, 'audio/webm');
-    await db.collection('audioRecordings').add({
-      conversationId,
-      fileName: audioPath,
-      mimeType: 'audio/webm',
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    await db.collection('audioRecordings').add({ conversationId, fileName: audioPath, mimeType: 'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     const transcription = await transcribe(gsUri);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{ children: [
-      new Paragraph({ children:[ new TextRun({ text: 'Transcription brute', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }),
-      new Paragraph({ children:[ new TextRun(transcription) ] })
-    ] }], txtPath);
-    await db.collection('transcriptions').add({
-      conversationId,
-      fileName: txtPath,
-      transcription,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    await generateDocx([{ children: [ new Paragraph({ children:[ new TextRun({ text: 'Transcription brute', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }), new Paragraph({ children:[ new TextRun(transcription) ] }) ] }], txtPath);
+    await db.collection('transcriptions').add({ conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     const summary = await summarizeText(transcription);
     const summaryPath = `reports/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{ children: [
-      new Paragraph({ children:[ new TextRun({ text: 'Résumé IA', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }),
-      new Paragraph({ children:[ new TextRun(summary) ] })
-    ] }], summaryPath);
-    await db.collection('aiReports').add({
-      conversationId,
-      fileName: summaryPath,
-      summary,
-      consent: true,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    await generateDocx([{ children: [ new Paragraph({ children:[ new TextRun({ text: 'Résumé IA', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }), new Paragraph({ children:[ new TextRun(summary) ] }) ] }], summaryPath);
+    await db.collection('aiReports').add({ conversationId, fileName: summaryPath, summary, consent: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     console.log('[callReport] All steps completed successfully');
-    res.json({
-      success: true,
-      transcriptionDoc: txtPath,
-      summaryDoc: summaryPath
-    });
+    res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: summaryPath });
 
   } catch (err) {
     console.error('[callReport] ERROR', err);
