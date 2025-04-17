@@ -115,10 +115,8 @@ async function generateDocx(sections, path) {
 async function summarizeText(text) {
   console.log('[callReport] Summarizing via GoogleGenAI with structured format');
   const prompt = `Tu es un assistant expert en rédaction de comptes rendus. À partir de cette transcription, génère un rapport structuré au format JSON avec les clés suivantes :
-` +
-    `titre: chaîne, date: chaîne (format JJ MMMM YYYY), objet: chaîne, participants: liste de chaînes, pointsCles: liste de chaînes, prochainesEtapes: liste de chaînes, conclusion: chaîne.
-` +
-    `Transcription :
+titre: chaîne, date: chaîne (format JJ MMMM YYYY), objet: chaîne, participants: liste de chaînes, pointsCles: liste de chaînes, prochainesEtapes: liste de chaînes, conclusion: chaîne.
+Transcription :
 ${text}`;
   const msg = { text: prompt };
   const chat = ai.chats.create({ model: 'gemini-2.0-flash-001', config: generationConfig });
@@ -127,15 +125,31 @@ ${text}`;
     if (chunk.text) result += chunk.text;
   }
   console.log('[callReport] Raw structured summary =', result);
+
+  // On nettoie d’éventuels blocs Markdown ```json … ```
+  let clean = result.trim()
+    .replace(/^```(?:json)?\s*/, '')
+    .replace(/\s*```$/, '');
+  console.log('[callReport] Clean JSON string =', clean);
+
   let data;
   try {
-    data = JSON.parse(result);
+    data = JSON.parse(clean);
   } catch (e) {
     console.warn('[callReport] JSON parsing failed, using fallback summary');
-    data = { titre: 'Compte Rendu', date: new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' }), objet: '', participants: [], pointsCles: [], prochainesEtapes: [], conclusion: result };
+    data = {
+      titre: 'Compte Rendu',
+      date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }),
+      objet: '',
+      participants: [],
+      pointsCles: [],
+      prochainesEtapes: [],
+      conclusion: clean || text
+    };
   }
   return data;
 }
+
 
 
 // Main route
