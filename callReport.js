@@ -11,11 +11,13 @@ const router = express.Router();
 
 // ---------- Init Firebase Admin ----------
 const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-fbCred.private_key = fbCred.private_key.replace(/\\n/g, '\n');
-admin.initializeApp({
-  credential: admin.credential.cert(fbCred),
-  storageBucket: process.env.FIREBASE_BUCKET    // ex: "capy-invest.appspot.com"
-});
+fbCred.private_key = fbCred.private_key.replace(/\n/g, '');
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(fbCred),
+    storageBucket: process.env.FIREBASE_BUCKET    // ex: "capy-invest.appspot.com"
+  });
+}
 const bucket = admin.storage().bucket();
 const db     = admin.firestore();
 
