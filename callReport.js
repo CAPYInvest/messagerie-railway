@@ -2,11 +2,11 @@
 require('dotenv').config();
 const fs = require('fs');
 const express = require('express');
-const axios   = require('axios');
+const axios = require('axios');
 const { SpeechClient } = require('@google-cloud/speech');
 const { GoogleGenAI } = require('@google/genai');
-const admin   = require('firebase-admin');
-const { Document, Packer, Paragraph, TextRun } = require('docx');
+const admin = require('firebase-admin');
+const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
 
 // Auth GoogleGenAI via ADC
 if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
@@ -20,7 +20,7 @@ if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
 // Init GenAI client
 const ai = new GoogleGenAI({
   vertexai: true,
-  project : process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
+  project: process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
   location: process.env.GOOGLE_VERTEX_AI_LOCATION
 });
 // Generation configuration
@@ -28,7 +28,7 @@ const generationConfig = {
   maxOutputTokens: 8192,
   temperature: 1,
   topP: 0.95,
-  responseModalities: ["TEXT"],
+  responseModalities: ['TEXT'],
   safetySettings: [
     { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'OFF' },
     { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'OFF' },
@@ -49,15 +49,12 @@ if (!admin.apps.length) {
   });
 }
 const bucket = admin.storage().bucket();
-const db     = admin.firestore();
+const db = admin.firestore();
 
 // Init Speech-to-Text
 const stCred = JSON.parse(process.env.GOOGLE_SPEECH_TO_TEXT_SERVICE_ACCOUNT);
 stCred.private_key = stCred.private_key.replace(/\\n/g, '\n');
-const speechClient = new SpeechClient({
-  credentials: stCred,
-  projectId: stCred.project_id
-});
+const speechClient = new SpeechClient({ credentials: stCred, projectId: stCred.project_id });
 
 // Helper: Poll until recording is ready
 async function waitReady(recId, maxTries = 10, delayMs = 6000) {
@@ -106,10 +103,10 @@ async function transcribe(gsUri) {
   return res.results.map(r => r.alternatives[0].transcript).join('\n');
 }
 
-// Generate DOCX
-async function generateDocx(contentSections, path) {
+// Generate DOCX helper
+async function generateDocx(sections, path) {
   console.log(`[callReport] Generating DOCX ${path}`);
-  const doc = new Document({ sections: contentSections });
+  const doc = new Document({ sections });
   const buf = await Packer.toBuffer(doc);
   await saveBuffer(buf, path, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 }
@@ -135,21 +132,42 @@ router.post('/', async (req, res) => {
     console.log('[callReport] Request', req.body);
     if (!recordingId || !conversationId) return res.status(400).json({ error: 'Missing data' });
 
+    // wait and download
     await waitReady(recordingId);
     const dl = await getDownloadLink(recordingId);
     const bufAudio = await downloadBuffer(dl);
+
+    // store raw audio
     const audioPath = `temp_audio/${conversationId}_${Date.now()}.webm`;
     const gsAudio = await saveBuffer(bufAudio, audioPath, 'audio/webm');
     await db.collection('audioRecordings').add({ conversationId, fileName: audioPath, mimeType: 'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
+    // transcription
     const transcription = await transcribe(gsAudio);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{ children: [ new Paragraph({ children: [ new TextRun({ text: 'Transcription brute', bold: true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }), new Paragraph({ children: [ new TextRun(transcription) ] }) ] }], txtPath);
+    await generateDocx([{
+      children: [
+        new Paragraph({ text: 'Transcription brute', heading: HeadingLevel.HEADING_2 }),
+        new Paragraph({ text: `Conversation ID : ${conversationId}`, spacing: { after: 200 } }),
+        new Paragraph({ text: transcription })
+      ]
+    }], txtPath);
     await db.collection('transcriptions').add({ conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
+    // summarize
     const summary = await summarizeText(transcription);
-    const summaryPath = `Rapport_Daily_AI/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{ children: [ new Paragraph({ children: [ new TextRun({ text: 'Résumé IA', bold: true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }), new Paragraph({ children: [ new TextRun(summary) ] }) ] }], summaryPath);
+    // format date for filename and doc
+    const today = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+    const safeDate = today.replace(/\s+/g, '_');
+    const summaryPath = `Rapport_Daily_AI/Rapport_du_${safeDate}_${conversationId}.docx`;
+
+    await generateDocx([{
+      children: [
+        new Paragraph({ text: `Compte Rendu du ${today}`, heading: HeadingLevel.TITLE, thematicBreak: true }),
+        new Paragraph({ text: `Conversation ID : ${conversationId}`, spacing: { after: 300 } }),
+        new Paragraph({ text: summary })
+      ]
+    }], summaryPath);
     await db.collection('Rapport_Daily_AI').add({ conversationId, fileName: summaryPath, summary, consent: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     console.log('[callReport] Success');
