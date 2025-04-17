@@ -31,11 +31,11 @@ const speechClient = new SpeechClient({
 
 // ---------- Init Vertex AI (env vars updated) ----------
 console.log("[callReport] Vertex AI init: project=", process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-            "region=", process.env.GOOGLE_VERTEX_AI_LOCATION);
+  "region=", process.env.GOOGLE_VERTEX_AI_LOCATION);
 const vertex = new VertexAI({
-  projectId: process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-  location : process.env.GOOGLE_VERTEX_AI_LOCATION || 'us-central1',
-  credentials: JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT)
+project : process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
+location: process.env.GOOGLE_VERTEX_AI_LOCATION || 'us-central1',
+credentials: JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT)
 });
 
 // ---------- Helpers ----------
