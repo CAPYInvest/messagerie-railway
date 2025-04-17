@@ -111,12 +111,17 @@ async function generateDocx(sections, destPath) {
 
 async function summarizeText(text) {
   console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI using Gemini Flash`);
-  // Choix du modèle Gemini Flash pour un bon ratio qualité/coût
+  // Choix du modèle Gemini Flash
   const genModel = vertex.preview.getGenerativeModel({ model: 'models/gemini-2.0-flash' });
-  // Construction du prompt (pas de system role, supporté par l'API)
+  // Construction du prompt
   const prompt = `Tu es un assistant formel et académique. Génère un résumé concis et clair du dialogue suivant :
 ${text}`;
-  const resp = await genModel.generateContent({ contents: [ { parts: [ { text: prompt } ] } ] });
+  // Appel generateContent avec role 'user'
+  const resp = await genModel.generateContent({
+    contents: [
+      { role: 'user', parts: [ { text: prompt } ] }
+    ]
+  });
   console.log('[callReport] Raw summary candidates =', JSON.stringify(resp.candidates));
   // Extraction du résumé ou fallback
   let summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
