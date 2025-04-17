@@ -8,7 +8,9 @@
         "build": "echo \"No build step necessary\""
     },
     "dependencies": {
+        "@google-cloud/aiplatform": "^4.1.0",
         "@google-cloud/speech": "^7.0.1",
+        "@google-cloud/vertexai": "^1.9.3",
         "@google/genai": "^0.8.0",
         "axios": "^1.8.4",
         "cors": "^2.8.5",
