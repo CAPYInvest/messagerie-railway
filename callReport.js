@@ -113,13 +113,10 @@ async function summarizeText(text) {
   console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI using Gemini Flash`);
   // Choix du modèle Gemini Flash pour un bon ratio qualité/coût
   const genModel = vertex.preview.getGenerativeModel({ model: 'models/gemini-2.0-flash' });
-  // Construction du prompt avec message système et utilisateur
-  const contents = [
-    { role: 'system', parts: [ { text: 'Tu es un assistant formel et académique. Génère un résumé concis et clair du dialogue suivant.' } ] },
-    { role: 'user', parts: [ { text: `Dialogue :
-${text}` } ] }
-  ];
-  const resp = await genModel.generateContent({ contents });
+  // Construction du prompt (pas de system role, supporté par l'API)
+  const prompt = `Tu es un assistant formel et académique. Génère un résumé concis et clair du dialogue suivant :
+${text}`;
+  const resp = await genModel.generateContent({ contents: [ { parts: [ { text: prompt } ] } ] });
   console.log('[callReport] Raw summary candidates =', JSON.stringify(resp.candidates));
   // Extraction du résumé ou fallback
   let summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -130,6 +127,7 @@ ${text}` } ] }
   console.log('[callReport] Summary received (length=', summary.length, ')');
   return summary;
 }
+
 
 // ---------- Route principale ----------
 router.post('/', async (req, res) => {
