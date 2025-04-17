@@ -31,11 +31,11 @@ const speechClient = new SpeechClient({
 
 // ---------- Init Vertex AI (env vars updated) ----------
 console.log("[callReport] Vertex AI init: project=", process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-  "region=", process.env.GOOGLE_VERTEX_AI_LOCATION);
+            "region=", process.env.GOOGLE_VERTEX_AI_LOCATION);
 const vertex = new VertexAI({
-project : process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-location: process.env.GOOGLE_VERTEX_AI_LOCATION || 'us-central1',
-credentials: JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT)
+  project : process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
+  location: process.env.GOOGLE_VERTEX_AI_LOCATION || 'us-central1',
+  credentials: JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT)
 });
 
 // ---------- Helpers ----------
@@ -48,7 +48,7 @@ async function waitReady(recId, maxTries = 10, delayMs = 6000) {
       `https://api.daily.co/v1/recordings/${recId}`, { headers }
     );
     console.log(`[callReport] Try ${i+1}/${maxTries}, status=`, data.status);
-    if (data.status === 'ready') {
+    if (data.status === 'ready' || data.status === 'finished') {
       console.log(`[callReport] Recording ${recId} is ready.`);
       return data;
     }
@@ -115,11 +115,6 @@ async function summarizeText(text) {
   console.log('[callReport] Summary received (length=', summary.length, ')');
   return summary;
 }
-
-
-
-
-
 
 router.post('/', async (req, res) => {
   try {
