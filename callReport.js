@@ -113,7 +113,12 @@ async function summarizeText(text) {
   console.log(`[callReport] Summarizing text (length=${text.length}) via Vertex AI`);
   const genModel = vertex.preview.getGenerativeModel({ model: 'models/gemini-2.0-flash-lite' });
   const resp = await genModel.generateContent({ contents: [{ role: 'user', parts: [{ text: `Résume en français :\n${text}` }] }] });
-  const summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  console.log('[callReport] Raw summary candidates =', JSON.stringify(resp.candidates));
+  let summary = resp.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  if (!summary) {
+    console.log('[callReport] Summary empty, using transcription as fallback');
+    summary = text;
+  }
   console.log('[callReport] Summary received (length=', summary.length, ')');
   return summary;
 }
@@ -126,7 +131,6 @@ router.post('/', async (req, res) => {
     if (!recordingId || !conversationId) {
       return res.status(400).json({ error: 'recordingId et conversationId requis' });
     }
-
     await waitReady(recordingId);
     const downloadUrl = await getDownloadLink(recordingId);
     const audioBuf = await downloadBuffer(downloadUrl);
@@ -136,17 +140,26 @@ router.post('/', async (req, res) => {
 
     const transcription = await transcribe(gsUri);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{ children: [ new Paragraph({ children:[ new TextRun({ text: 'Transcription brute', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }), new Paragraph({ children:[ new TextRun(transcription) ] }) ] }], txtPath);
+    await generateDocx([{
+      children: [
+        new Paragraph({ children:[ new TextRun({ text: 'Transcription brute', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }),
+        new Paragraph({ children:[ new TextRun(transcription) ] })
+      ]
+    }], txtPath);
     await db.collection('transcriptions').add({ conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     const summary = await summarizeText(transcription);
-    const summaryPath = `reports/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([{ children: [ new Paragraph({ children:[ new TextRun({ text: 'Résumé IA', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }), new Paragraph({ children:[ new TextRun(summary) ] }) ] }], summaryPath);
-    await db.collection('aiReports').add({ conversationId, fileName: summaryPath, summary, consent: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    const summaryPath = `Rapport_Daily_AI/${conversationId}_${Date.now()}.docx`;
+    await generateDocx([{
+      children: [
+        new Paragraph({ children:[ new TextRun({ text: 'Résumé IA', bold:true }), new TextRun({ text: `\nConversation ID : ${conversationId}\n\n` }) ] }),
+        new Paragraph({ children:[ new TextRun(summary) ] })
+      ]
+    }], summaryPath);
+    await db.collection('Rapport_Daily_AI').add({ conversationId, fileName: summaryPath, summary, consent: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     console.log('[callReport] All steps completed successfully');
     res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: summaryPath });
-
   } catch (err) {
     console.error('[callReport] ERROR', err);
     res.status(500).json({ error: err.message });
