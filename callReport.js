@@ -10,18 +10,6 @@ const { GoogleGenAI } = require('@google/genai');
 const admin = require('firebase-admin');
 const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
 
-// Init Firebase Admin
-const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-fbCred.private_key = fbCred.private_key.replace(/\n/g, "\n");
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(fbCred),
-    storageBucket: process.env.FIREBASE_BUCKET
-  });
-}
-const bucket = admin.storage().bucket();
-const db = admin.firestore();
-
 // Auth GoogleGenAI via ADC
 if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
   const creds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
@@ -37,9 +25,10 @@ const ai = new GoogleGenAI({
   project: process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
   location: process.env.GOOGLE_VERTEX_AI_LOCATION
 });
+// Generation configuration
 const generationConfig = {
   maxOutputTokens: 8192,
-  temperature: 0.3,
+  temperature: 1,
   topP: 0.95,
   responseModalities: ['TEXT'],
   safetySettings: [
@@ -50,9 +39,23 @@ const generationConfig = {
   ]
 };
 
+const router = express.Router();
+
+// Init Firebase Admin
+const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+fbCred.private_key = fbCred.private_key.replace(/\\n/g, '\n');
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(fbCred),
+    storageBucket: process.env.FIREBASE_BUCKET
+  });
+}
+const bucket = admin.storage().bucket();
+const db = admin.firestore();
+
 // Init Speech-to-Text
 const stCred = JSON.parse(process.env.GOOGLE_SPEECH_TO_TEXT_SERVICE_ACCOUNT);
-stCred.private_key = stCred.private_key.replace(/\n/g, "\n");
+stCred.private_key = stCred.private_key.replace(/\\n/g, '\n');
 const speechClient = new SpeechClient({ credentials: stCred, projectId: stCred.project_id });
 
 // Load Word template once at startup
@@ -70,10 +73,11 @@ let templateBuffer = null;
 
 // Helper: Poll until recording is ready
 async function waitReady(recId, maxTries = 10, delayMs = 6000) {
+  console.log(`[callReport] Waiting for recording ${recId} to be ready...`);
   const headers = { Authorization: `Bearer ${process.env.DAILY_API_KEY}` };
   for (let i = 0; i < maxTries; i++) {
     const { data } = await axios.get(`https://api.daily.co/v1/recordings/${recId}`, { headers });
-    console.log(`[callReport] recording status (${i+1}/${maxTries}):`, data.status);
+    console.log(`[callReport] Try ${i+1}/${maxTries}, status=`, data.status);
     if (data.status === 'ready' || data.status === 'finished') return;
     await new Promise(r => setTimeout(r, delayMs));
   }
@@ -82,6 +86,7 @@ async function waitReady(recId, maxTries = 10, delayMs = 6000) {
 
 // Helper: get signed download link
 async function getDownloadLink(recId) {
+  console.log(`[callReport] Generating download link`);
   const headers = { Authorization: `Bearer ${process.env.DAILY_API_KEY}` };
   const { data } = await axios.get(`https://api.daily.co/v1/recordings/${recId}/access-link`, { headers });
   return data.download_link;
@@ -89,26 +94,22 @@ async function getDownloadLink(recId) {
 
 // Helper: download binary
 async function downloadBuffer(url) {
+  console.log(`[callReport] Downloading audio buffer`);
   const resp = await axios.get(url, { responseType: 'arraybuffer' });
   return Buffer.from(resp.data);
 }
 
 // Helper: save buffer to Firebase Storage
 async function saveBuffer(buffer, path, contentType) {
+  console.log(`[callReport] Saving ${path}`);
   const file = bucket.file(path);
   await file.save(buffer, { metadata: { contentType } });
   return `gs://${bucket.name}/${path}`;
 }
 
-// Helper: generate simple docx (transcription)
-async function generateDocx(sections, path) {
-  const doc = new Document({ sections });
-  const buf = await Packer.toBuffer(doc);
-  await saveBuffer(buf, path, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-}
-
 // Transcription
 async function transcribe(gsUri) {
+  console.log(`[callReport] Transcribing ${gsUri}`);
   const [op] = await speechClient.longRunningRecognize({
     audio: { uri: gsUri },
     config: { encoding: 'WEBM_OPUS', sampleRateHertz: 48000, languageCode: 'fr-FR' }
@@ -117,35 +118,57 @@ async function transcribe(gsUri) {
   return res.results.map(r => r.alternatives[0].transcript).join('\n');
 }
 
+// Generate DOCX helper
+async function generateDocx(sections, path) {
+  console.log(`[callReport] Generating DOCX ${path}`);
+  const doc = new Document({ sections });
+  const buf = await Packer.toBuffer(doc);
+  await saveBuffer(buf, path, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+}
+
 // Summarization using GoogleGenAI with structured JSON output
 async function summarizeText(text) {
-  const prompt = `Tu es un assistant expert en rédaction de comptes rendus. Génére un rapport structuré au format JSON avec ces clés : titre, date (JJ MMMM YYYY), heure (HH:MM), objet, participants (liste), pointsCles (liste), prochainesEtapes (liste), actionsARealiser (liste), conclusion. Transcription :\n${text}`;
+  console.log('[callReport] Summarizing via GoogleGenAI with structured format');
+  const prompt = `Tu es un assistant expert en rédaction de comptes rendus. À partir de cette transcription, génère un rapport structuré au format JSON avec les clés suivantes :
+titre: chaîne, date: chaîne (format JJ MMMM YYYY), objet: chaîne, participants: liste de chaînes, pointsCles: liste de chaînes, prochainesEtapes: liste de chaînes, actionsARealiser (liste), conclusion: chaîne.
+Transcription :
+${text}`;
+  const msg = { text: prompt };
   const chat = ai.chats.create({ model: 'gemini-2.0-flash-001', config: generationConfig });
-  let raw = '';
-  for await (const chunk of await chat.sendMessageStream({ message: { text: prompt } })) {
-    if (chunk.text) raw += chunk.text;
+  let result = '';
+  for await (const chunk of await chat.sendMessageStream({ message: msg })) {
+    if (chunk.text) result += chunk.text;
   }
-  // Strip code fences
-  const jsonStr = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
+  console.log('[callReport] Raw structured summary =', result);
+
+  // On nettoie d’éventuels blocs Markdown ```json … ```
+  let clean = result.trim()
+    .replace(/^```(?:json)?\s*/, '')
+    .replace(/\s*```$/, '');
+  console.log('[callReport] Clean JSON string =', clean);
+
+  let data;
   try {
-    return JSON.parse(jsonStr);
-  } catch {
-    return {
+    data = JSON.parse(clean);
+  } catch (e) {
+    console.warn('[callReport] JSON parsing failed, using fallback summary');
+    data = {
       titre: 'Compte Rendu',
-      date: new Date().toLocaleDateString('fr-FR'),
-      heure: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),
+      date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }),
       objet: '',
       participants: [],
       pointsCles: [],
       prochainesEtapes: [],
       actionsARealiser: [],
-      conclusion: text
+      conclusion: clean || text
     };
   }
+  return data;
 }
 
-// Main router
-const router = express.Router();
+
+
+// Main route
 router.post('/', async (req, res) => {
   try {
     const { recordingId, conversationId } = req.body;
@@ -201,5 +224,6 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 module.exports = router;
