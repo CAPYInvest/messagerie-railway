@@ -149,16 +149,6 @@ app.use('/api/process-daily-recording', callReportRouter);
 
 
 
-
-
-
-
-
-
-
-
-
-
 // ------------------------------------------------
 // Fonctions utilitaires Messagerie
 //-----------------------------------------------
@@ -315,7 +305,7 @@ app.get('/api/messages', requireAuth, async (req, res) => {
 // ROUTE 3 : GET /api/last-message?userId=....
 // ----------------------------------------------
 
-app.get('/api/last-message', requireAuth, async (req, res) => {
+app.get('/api/last-message', async (req, res) => {
   try {
     const { userId } = req.query;
     if (!userId) {
