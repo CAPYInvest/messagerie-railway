@@ -9,20 +9,23 @@ const admin = require('firebase-admin');
 const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
 
 // Auth GoogleGenAI via ADC
-if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
+/*if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
   const creds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
   const tmpPath = '/tmp/vertex-service-account.json';
   fs.writeFileSync(tmpPath, JSON.stringify(creds));
   process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
   console.log(`[callReport] Wrote AI creds to ${tmpPath}`);
-}
+}*/
 
-// Init GenAI client
+// Init GenAI client with explicit credentials
+const aiCreds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
 const ai = new GoogleGenAI({
   vertexai: true,
   project: process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
-  location: process.env.GOOGLE_VERTEX_AI_LOCATION
+  location: process.env.GOOGLE_VERTEX_AI_LOCATION,
+  credentials: aiCreds
 });
+
 // Generation configuration
 const generationConfig = {
   maxOutputTokens: 8192,
