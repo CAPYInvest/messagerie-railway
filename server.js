@@ -56,6 +56,18 @@ app.use('/api', authRoutes);
 
 
 
+/////////////////////////////////////////////////////
+app.get('/test-firestore', async (req, res) => {
+  try {
+    // on lit une collection que tu sais toujours présente
+    const snap = await db.collection('audioRecordings').limit(1).get();
+    return res.json({ ok: true, count: snap.size });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+
 
 
 //-------------------------------------------------------------------------------
@@ -305,7 +317,7 @@ app.get('/api/messages', requireAuth, async (req, res) => {
 // ROUTE 3 : GET /api/last-message?userId=....
 // ----------------------------------------------
 
-app.get('/api/last-message', async (req, res) => {
+app.get('/api/last-message', requireAuth, async (req, res) => {
   try {
     const { userId } = req.query;
     if (!userId) {
