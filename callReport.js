@@ -3,8 +3,6 @@ require('dotenv').config();
 const fs = require('fs');
 const express = require('express');
 const axios = require('axios');
-const PizZip = require('pizzip');
-const Docxtemplater = require('docxtemplater');
 const { SpeechClient } = require('@google-cloud/speech');
 const { GoogleGenAI } = require('@google/genai');
 const admin = require('firebase-admin');
@@ -57,19 +55,6 @@ const db = admin.firestore();
 const stCred = JSON.parse(process.env.GOOGLE_SPEECH_TO_TEXT_SERVICE_ACCOUNT);
 stCred.private_key = stCred.private_key.replace(/\\n/g, '\n');
 const speechClient = new SpeechClient({ credentials: stCred, projectId: stCred.project_id });
-
-// Load Word template once at startup
-let templateBuffer = null;
-(async () => {
-  try {
-    console.log('[callReport] Loading Word template');
-    const [buf] = await bucket.file('templates/Rapport_Daily_AI_Template.docx').download();
-    templateBuffer = buf;
-    console.log('[callReport] Template loaded');
-  } catch (err) {
-    console.error('[callReport] Failed to load template:', err);
-  }
-})();
 
 // Helper: Poll until recording is ready
 async function waitReady(recId, maxTries = 10, delayMs = 6000) {
@@ -130,7 +115,7 @@ async function generateDocx(sections, path) {
 async function summarizeText(text) {
   console.log('[callReport] Summarizing via GoogleGenAI with structured format');
   const prompt = `Tu es un assistant expert en rédaction de comptes rendus. À partir de cette transcription, génère un rapport structuré au format JSON avec les clés suivantes :
-titre: chaîne, date: chaîne (format JJ MMMM YYYY), objet: chaîne, participants: liste de chaînes, pointsCles: liste de chaînes, prochainesEtapes: liste de chaînes, actionsARealiser (liste), conclusion: chaîne.
+titre: chaîne, date: chaîne (format JJ MMMM YYYY), objet: chaîne, participants: liste de chaînes, pointsCles: liste de chaînes, prochainesEtapes: liste de chaînes, conclusion: chaîne.
 Transcription :
 ${text}`;
   const msg = { text: prompt };
@@ -159,7 +144,6 @@ ${text}`;
       participants: [],
       pointsCles: [],
       prochainesEtapes: [],
-      actionsARealiser: [],
       conclusion: clean || text
     };
   }
@@ -172,53 +156,56 @@ ${text}`;
 router.post('/', async (req, res) => {
   try {
     const { recordingId, conversationId } = req.body;
+    console.log('[callReport] Request', req.body);
     if (!recordingId || !conversationId) return res.status(400).json({ error: 'Missing data' });
 
-    // 1) Poll & download
     await waitReady(recordingId);
-    const dlUrl = await getDownloadLink(recordingId);
-    const audioBuf = await downloadBuffer(dlUrl);
+    const downloadUrl = await getDownloadLink(recordingId);
+    const audioBuf = await downloadBuffer(downloadUrl);
     const audioPath = `temp_audio/${conversationId}_${Date.now()}.webm`;
-    await saveBuffer(audioBuf, audioPath, 'audio/webm');
-    await db.collection('audioRecordings').add({ conversationId, fileName: audioPath, mimeType:'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    const gsAudio = await saveBuffer(audioBuf, audioPath, 'audio/webm');
+    await db.collection('audioRecordings').add({ conversationId, fileName: audioPath, mimeType: 'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    // 2) Transcription
-    const transcription = await transcribe(`gs://${bucket.name}/${audioPath}`);
+    const transcription = await transcribe(gsAudio);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
-    await generateDocx([
-      { children: [ new Paragraph({ text: 'Transcription', heading: HeadingLevel.HEADING_2 }), new Paragraph({ text: transcription }) ] }
-    ], txtPath);
+    await generateDocx([{ children: [ new Paragraph({ text: 'Transcription', heading: HeadingLevel.HEADING_2 }), new Paragraph({ text: transcription }) ] }], txtPath);
     await db.collection('transcriptions').add({ conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    // 3) Summarization
-    const data = await summarizeText(transcription);
-
-    // 4) Populate template
-    if (!templateBuffer) throw new Error('Template not loaded');
-    const zip = new PizZip(templateBuffer);
-    const docxTemplate = new Docxtemplater(zip, { paragraphLoop:true, linebreaks:true });
-    docxTemplate.setData({
-      TITRE: data.titre,
-      DATE: data.date,
-      HEURE: data.heure,
-      OBJET: data.objet,
-      PARTICIPANTS: data.participants.join('\n'),
-      POINTS_CLES: data.pointsCles.join('\n'),
-      PROCHAINES_ETAPES: data.prochainesEtapes.join('\n'),
-      ACTIONS_A_REALISER: data.actionsARealiser.join('\n'),
-      CONCLUSION: data.conclusion,
-      CONVERSATION_ID: conversationId
-    });
-    docxTemplate.render();
-    const bufOut = docxTemplate.getZip().generate({ type:'nodebuffer' });
-
-    // 5) Save final report
-    const safeDate = data.date.replace(/\s+/g,'_');
+    const reportData = await summarizeText(transcription);
+    const safeDate = reportData.date.replace(/\s+/g, '_');
     const summaryPath = `Rapport_Daily_AI/Rapport_du_${safeDate}_${conversationId}.docx`;
-    await saveBuffer(bufOut, summaryPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    await db.collection('Rapport_Daily_AI').add({ conversationId, fileName: summaryPath, ...data, consent:true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    const sections = [
+      { children: [
+          new Paragraph({ text: reportData.titre || `Compte Rendu du ${reportData.date}`, heading: HeadingLevel.TITLE }),
+          new Paragraph({ text: `Date : ${reportData.date}`, spacing: { after: 300 } }),
+          new Paragraph({ text: `Objet : ${reportData.objet}`, heading: HeadingLevel.HEADING_2 }),
+          new Paragraph({ text: 'Participants :', heading: HeadingLevel.HEADING_3 }),
+          ...reportData.participants.map(p => new Paragraph({ text: p, bullet: { level: 0 } })),
+          new Paragraph({ text: 'Points Clés :', heading: HeadingLevel.HEADING_3 }),
+          ...reportData.pointsCles.map(pc => new Paragraph({ text: pc, bullet: { level: 0 } })),
+          new Paragraph({ text: 'Prochaines Étapes :', heading: HeadingLevel.HEADING_3 }),
+          ...reportData.prochainesEtapes.map(pe => new Paragraph({ text: pe, bullet: { level: 0 } })),
+          new Paragraph({ text: 'Conclusion :', heading: HeadingLevel.HEADING_3, spacing: { before: 200 } }),
+          new Paragraph({ text: reportData.conclusion })
+        ]
+      }
+    ];
+    await generateDocx(sections, summaryPath);
+    await db.collection('Rapport_Daily_AI').add({
+      conversationId,
+      fileName: summaryPath,
+      summary: reportData.conclusion,
+      date: reportData.date,
+      objet: reportData.objet,
+      participants: reportData.participants,
+      pointsCles: reportData.pointsCles,
+      prochainesEtapes: reportData.prochainesEtapes,
+      consent: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
 
-    res.json({ success:true, transcriptionDoc: txtPath, summaryDoc: summaryPath });
+    console.log('[callReport] Success');
+    res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: summaryPath });
   } catch (err) {
     console.error('[callReport] ERROR', err);
     res.status(500).json({ error: err.message });
