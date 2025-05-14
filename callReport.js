@@ -37,7 +37,30 @@ const generationConfig = {
   ]
 };
 
+// Load Word template from Firebase Storage once at startup
+let templateBuffer = null;
+(async () => {
+  try {
+    console.log('[callReport] Loading Word template...');
+    const [buf] = await bucket.file('templates/Rapport_Daily_AI_Template.docx').download();
+    templateBuffer = buf;
+    console.log('[callReport] Template loaded.');
+  } catch (e) {
+    console.error('[callReport] Error loading template:', e);
+  }
+})();
+
+
+
+
+
+
+
+
 const router = express.Router();
+
+// After parsing summary JSON, automatically set current time if missing
+// (added in summarizeText function): data.heure = data.heure || new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 
 // Init Firebase Admin
 const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -113,7 +136,7 @@ async function generateDocx(sections, path) {
 
 // Summarization using GoogleGenAI with structured JSON output
 async function summarizeText(text) {
-  console.log('[callReport] Summarizing via GoogleGenAI with structured format');
+  console.log('[callReport] Summarizing via GoogleGenAI');
   const prompt = `Tu es un assistant expert en rédaction de comptes rendus. À partir de cette transcription, génère un rapport structuré au format JSON avec les clés suivantes :
 titre: chaîne, date: chaîne (format JJ MMMM YYYY), objet: chaîne, participants: liste de chaînes, pointsCles: liste de chaînes, prochainesEtapes: liste de chaînes, conclusion: chaîne.
 Transcription :
@@ -131,22 +154,8 @@ ${text}`;
     .replace(/^```(?:json)?\s*/, '')
     .replace(/\s*```$/, '');
   console.log('[callReport] Clean JSON string =', clean);
-
   let data;
-  try {
-    data = JSON.parse(clean);
-  } catch (e) {
-    console.warn('[callReport] JSON parsing failed, using fallback summary');
-    data = {
-      titre: 'Compte Rendu',
-      date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }),
-      objet: '',
-      participants: [],
-      pointsCles: [],
-      prochainesEtapes: [],
-      conclusion: clean || text
-    };
-  }
+  try { data = JSON.parse(clean); } catch { data = { titre:'Compte Rendu', date:'', objet:'', participants:[], pointsCles:[], prochainesEtapes:[], conclusion: clean||text }; }
   return data;
 }
 
