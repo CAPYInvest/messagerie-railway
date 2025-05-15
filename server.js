@@ -56,18 +56,6 @@ app.use('/api', authRoutes);
 
 
 
-/////////////////////////////////////////////////////
-app.get('/test-firestore', async (req, res) => {
-  try {
-    // on lit une collection que tu sais toujours présente
-    const snap = await db.collection('audioRecordings').limit(1).get();
-    return res.json({ ok: true, count: snap.size });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-
 
 
 //-------------------------------------------------------------------------------
@@ -157,6 +145,16 @@ function sanitizeString(str) {
 // Dans server.js (après l'initialisation des autres routes)
 const callReportRouter = require('./callReport');
 app.use('/api/process-daily-recording', callReportRouter);
+
+
+
+
+
+
+
+
+
+
 
 
 
