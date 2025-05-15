@@ -1,5 +1,6 @@
 // callReport.js
 require('dotenv').config();
+const fs = require('fs');                     // Add fs for credential writing
 const express = require('express');
 const axios = require('axios');
 const { SpeechClient } = require('@google-cloud/speech');
@@ -8,6 +9,15 @@ const admin = require('firebase-admin');
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
 const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
+
+// --- Write Vertex AI service account to disk and set ADC ---
+if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
+  const creds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
+  const tmpPath = '/tmp/vertex-service-account.json';
+  fs.writeFileSync(tmpPath, JSON.stringify(creds));
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
+  console.log('[callReport] Wrote AI creds to ' + tmpPath);
+}
 
 // --- Firebase Admin initialization ---
 const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -112,7 +122,6 @@ async function summarizeText(text) {
   }
   console.log('[callReport] Raw structured summary =', result);
 
-  // Strip code fences
   const clean = result.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
   console.log('[callReport] Clean JSON string =', clean);
 
@@ -137,7 +146,6 @@ router.post('/', async (req, res) => {
     const { recordingId, conversationId, callerType } = req.body;
     if (!recordingId || !conversationId) return res.status(400).json({ error: 'Missing data' });
 
-    // 1) Poll and download
     await waitReady(recordingId);
     const dlUrl = await getDownloadLink(recordingId);
     const audioBuf = await downloadBuffer(dlUrl);
@@ -145,7 +153,6 @@ router.post('/', async (req, res) => {
     await saveBuffer(audioBuf, audioPath, 'audio/webm');
     await db.collection('audioRecordings').add({ conversationId, fileName: audioPath, mimeType:'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    // 2) Transcription save
     const transcription = await transcribe(`gs://${bucket.name}/${audioPath}`);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
     const doc = new Document({ sections:[{ children:[ new Paragraph({ text:'Transcription', heading: HeadingLevel.HEADING_2 }), new Paragraph(transcription) ] }] });
@@ -153,10 +160,8 @@ router.post('/', async (req, res) => {
     await saveBuffer(bufTrans, txtPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     await db.collection('transcriptions').add({ conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    // 3) Summarization
     const data = await summarizeText(transcription);
 
-    // 4) Inject into template
     if (!templateBuffer) throw new Error('Template not loaded');
     const zip = new PizZip(templateBuffer);
     const tpl = new Docxtemplater(zip, { paragraphLoop:true, linebreaks:true });
@@ -174,7 +179,6 @@ router.post('/', async (req, res) => {
     tpl.render();
     const bufOut = tpl.getZip().generate({ type:'nodebuffer' });
 
-    // 5) Save final report
     const safeDate = data.date.replace(/\s+/g,'_');
     const summaryPath = `Rapport_Daily_AI/Rapport_du_${safeDate}_${conversationId}.docx`;
     await saveBuffer(bufOut, summaryPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
