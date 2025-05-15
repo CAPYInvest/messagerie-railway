@@ -142,52 +142,45 @@ async function summarizeText(text) {
 
 // --- Express router ---
 const router = express.Router();
-// Ensure route is protected to extract user ID\const { requireAuth } = require('./middlewareauth');
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { recordingId, conversationId } = req.body;
     if (!recordingId || !conversationId) return res.status(400).json({ error: 'Missing data' });
-    // 1) Record
     await waitReady(recordingId);
     const dlUrl = await getDownloadLink(recordingId);
     const audioBuf = await downloadBuffer(dlUrl);
-    const audioPath = `temp_audio/${req.member.uid}_${conversationId}_${Date.now()}.webm`;
+    const audioPath = `temp_audio/${conversationId}_${Date.now()}.webm`;
     await saveBuffer(audioBuf, audioPath, 'audio/webm');
-    await db.collection('audioRecordings').add({ userId:req.member.uid, conversationId, fileName: audioPath, mimeType: 'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    await db.collection('audioRecordings').add({ conversationId, fileName: audioPath, mimeType: 'audio/webm', createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    // 2) Transcription
     const transcription = await transcribe(`gs://${bucket.name}/${audioPath}`);
-    const txtPath = `transcriptions/${req.member.uid}_${conversationId}_${Date.now()}.docx`;
+    const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
     const docTrans = new Document({ sections: [{ children: [ new Paragraph({ text: 'Transcription', heading: HeadingLevel.HEADING_2 }), new Paragraph({ text: transcription }) ] }] });
     const bufDoc = await Packer.toBuffer(docTrans);
     await saveBuffer(bufDoc, txtPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    await db.collection('transcriptions').add({ userId:req.member.uid, conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    await db.collection('transcriptions').add({ conversationId, fileName: txtPath, transcription, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    // 3) Summarize
     const data = await summarizeText(transcription);
-
-    // 4) Populate and save using template
     if (!templateBuffer) throw new Error('Template not loaded');
     const zip = new PizZip(templateBuffer);
     const tpl = new Docxtemplater(zip, { paragraphLoop:true, linebreaks:true, delimiters:{ start:'[%', end:'%]' } });
+    // Render directly with data (no deprecated setData):
     tpl.render({
       TITRE: data.titre,
       DATE: data.date,
       HEURE: data.heure,
       OBJET: data.objet,
-      PARTICIPANTS: (data.participants||[]).join('\n'),
-      POINTS_CLES: (data.pointsCles||[]).join('\n'),
-      PROCHAINES_ETAPES: (data.prochainesEtapes||[]).join('\n'),
-      ACTIONS_A_REALISER: (data.actionsARealiser||[]).join('\n'),
+      PARTICIPANTS: (data.participants || []).join('\n'),
+      POINTS_CLES: (data.pointsCles || []).join('\n'),
+      PROCHAINES_ETAPES: (data.prochainesEtapes || []).join('\n'),
+      ACTIONS_A_REALISER: (data.actionsARealiser || []).join('\n'),
       CONCLUSION: data.conclusion
     });
     const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
-
-    // Save under user-specific folder
     const safeDate = data.date.replace(/\s+/g,'_');
-    const reportPath = `Rapport_Daily_IA/Rapport_de_${req.member.uid}/Rapport_du_${safeDate}_${conversationId}.docx`;
+    const reportPath = `Rapport_Daily_AI/Rapport_du_${safeDate}_${conversationId}.docx`;
     await saveBuffer(bufOut, reportPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    await db.collection('Rapport_Daily_IA').add({ userId:req.member.uid, conversationId, fileName: reportPath, ...data, consent:true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    await db.collection('Rapport_Daily_AI').add({ conversationId, fileName: reportPath, ...data, consent:true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     res.json({ success:true, transcriptionDoc: txtPath, summaryDoc: reportPath });
   } catch (err) {
