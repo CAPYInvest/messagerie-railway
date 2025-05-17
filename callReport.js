@@ -117,16 +117,14 @@ async function transcribe(gsUri) {
   return res.results.map(r => r.alternatives[0].transcript).join('\n');
 }
 
-// --- Résumé structuré via GenAI ---
+// --- Résumé structuré via GenAI (DATE/HEURE supprimés) ---
 async function summarizeText(text) {
   console.log('[callReport] Summarizing via AI');
   const prompt = `
 Tu es un assistant spécialisé en comptes rendus professionnels, expert en finance personnelle.
-À partir de la transcription ci-dessous, génère un objet JSON parfaitement formaté comprenant les clés suivantes :
+À partir de la transcription ci-dessous, génère **uniquement** un objet JSON parfaitement formaté comprenant les clés suivantes :
 
   • titre            : chaîne. Titre concis du compte-rendu.
-  • date             : chaîne au format JJ_MM_YYYY (date du jour).
-  • heure            : chaîne au format HH:mm (heure du serveur).
   • objet            : chaîne. Contexte et objectif principal de la conversation.
   • participants     : liste de chaînes. Nom ou rôle de chaque intervenant.
   • pointsCles       : liste de chaînes. 3 à 5 points essentiels discutés.
@@ -143,9 +141,9 @@ Transcription :
 ${text}
 `.trim();
 
-  const chat = ai.chats.create({ model: 'gemini-2.0-flash-001', config: generationConfig });
+  const chat = ai.chats.create({ model:'gemini-2.0-flash-001', config:generationConfig });
   let out = '';
-  for await (const chunk of await chat.sendMessageStream({ message: { text: prompt } })) {
+  for await (const chunk of await chat.sendMessageStream({ message:{ text: prompt } })) {
     if (chunk.text) out += chunk.text;
   }
   console.log('[callReport] Raw structured summary =', out);
@@ -162,8 +160,6 @@ ${text}
     const now = new Date();
     return {
       titre:            'Compte Rendu',
-      date:             now.toLocaleDateString('fr-FR'),
-      heure:            now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
       objet:            '',
       participants:     [],
       pointsCles:       [],
@@ -173,6 +169,7 @@ ${text}
     };
   }
 }
+
 
 // --- Route principale ---
 const router = express.Router();
@@ -220,12 +217,13 @@ router.post('/', async (req, res) => {
     const data = await summarizeText(transcription);
 
     // 1️⃣ On fixe la date et l’heure de façon fiable
-    const now = new Date();
-    const day   = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year  = String(now.getFullYear());
-    data.date  = `${day}_${month}_${year}`; // remplace la date IA
-    data.heure = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const now = new Date();
+const day   = String(now.getDate()).padStart(2,'0');
+const month = String(now.getMonth()+1).padStart(2,'0');
+const year  = String(now.getFullYear());
+data.date  = `${day}_${month}_${year}`;  // date serveur
+data.heure = now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});  // heure serveur
+
 
     // 2️⃣ On nettoie les proofs errors du template
     const zip = new PizZip(templateBuffer);
