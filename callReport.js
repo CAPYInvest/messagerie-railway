@@ -176,7 +176,14 @@ router.post('/', async (req, res) => {
     // 3) Générer le résumé structuré
     const data = await summarizeText(transcription);
 
-    // 4) Remplir le template
+    // 1️⃣ On fixe la date de façon fiable
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth()+1).padStart(2, '0');
+    const year = String(now.getFullYear());
+    data.date = `${day}_${month}_${year}`;     // remplace data.date IA
+
+    // 2️⃣ On génère le rapport à partir du template
     if (!templateBuffer) throw new Error('Template not loaded');
     const zip = new PizZip(templateBuffer);
     const tpl = new Docxtemplater(zip, {
@@ -184,37 +191,34 @@ router.post('/', async (req, res) => {
     linebreaks: true,
     delimiters: { start: '[%', end: '%]' }
     });
-
     tpl.render({
-      TITRE: data.titre,
-      DATE: data.date,
-      HEURE: data.heure,
-      OBJET: data.objet,
+      TITRE:    data.titre,
+      DATE:     data.date.replace(/_/g, '/'),  // pour afficher “JJ/MM/AAAA” dans le document
+      HEURE:    data.heure,
+      OBJET:    data.objet,
       PARTICIPANTS: (data.participants||[]).join('\n'),
       POINTS_CLES:   (data.pointsCles||[]).join('\n'),
       PROCHAINES_ETAPES: (data.prochainesEtapes||[]).join('\n'),
       ACTIONS_A_REALISER: (data.actionsARealiser||[]).join('\n'),
       CONCLUSION: data.conclusion
     });
+    const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
 
-    const bufOut = tpl.getZip().generate({ type:'nodebuffer' });
+
 
     // 5) Enregistrer sous member-specific folder
     // -> on remplace les "/" et espaces de la date par "_"
-    const safeDate = data.date.replace(/\//g,'_').replace(/\s+/g,'_');
-    const reportPath = 
-      `Rapport_Daily_AI/Rapport_de_${memberId}` +
-      `/Rapport_du_${safeDate}_${conversationId}.docx`;
+    const reportName = `Rapport_IA_du_${data.date}.docx`;
+    const reportPath = `Rapport_Daily_AI/Rapport_de_${req.body.memberId}/${reportName}`;
 
-    await saveBuffer(bufOut, reportPath,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-
-    await db.collection('Rapport_Daily_AI').add({
-      conversationId, memberId, fileName: reportPath,
-      ...data,
-      consent: true,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    // 4️⃣ Sauvegarde
+    await saveBuffer(bufOut,
+                reportPath,
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    await db.collection('Rapport_Daily_AI')
+        .add({ conversationId, fileName: reportPath, ...data,
+               consent:true,
+               createdAt: admin.firestore.FieldValue.serverTimestamp() });
 
     res.json({ success:true, transcriptionDoc:txtPath, summaryDoc:reportPath });
   } catch (err) {
