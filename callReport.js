@@ -226,15 +226,21 @@ router.post('/', async (req, res) => {
 
     tpl.render({
     TITRE:             data.titre,
-    DATE:              data.date.replace(/_/g, '/'),  // JJ_MM_AAAA → JJ/MM/AAAA
+    DATE:              data.date.replace(/_/g, '/'),
     HEURE:             data.heure,
     OBJET:             data.objet,
-    PARTICIPANTS:      data.participants || [],       // ← tableau brut
-    pointsCles:        data.pointsCles   || [],       // ← tableau brut
-    prochainesEtapes:  data.prochainesEtapes || [],   // ← tableau brut
-    ACTIONS_A_REALISER:  data.actionsARealiser || [],   // ← tableau brut
+    PARTICIPANTS:      (data.participants||[]).join('\n'),
+    // on ajoute des « • » devant chaque point
+    POINTS_CLES:    (data.pointsCles||[])
+                      .map(p => `• ${p}`)
+                      .join('\n'),
+    // on numérote les étapes (« 1. … », « 2. … »)
+    PROCHAINES_ETAPES: (data.prochainesEtapes||[])
+                        .map((step, i) => `${i+1}. ${step}`)
+                        .join('\n'),
+    ACTIONS_A_REALISER: (data.actionsARealiser||[]).join('\n'),
     CONCLUSION:        data.conclusion
-  });
+    }); 
   const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
 
 
