@@ -120,9 +120,28 @@ async function transcribe(gsUri) {
 // --- Résumé structuré via GenAI ---
 async function summarizeText(text) {
   console.log('[callReport] Summarizing via AI');
-  const prompt = `Tu es un assistant expert en comptes rendus. Génère un JSON structuré:
-{titre, date (JJ MMMM YYYY), heure (HH:mm), objet, participants[], pointsCles[], prochainesEtapes[], actionsARealiser[], conclusion}
-Transcription:\n${text}`;
+  const prompt = `
+Tu es un assistant spécialisé en comptes rendus professionnels, expert en finance personnelle. 
+À partir de la transcription ci-dessous, génère un objet JSON parfaitement formatté comprenant les clés suivantes :
+
+  • titre            : chaîne. Titre concis du compte-rendu.
+  • date             : chaîne au format JJ_MM_YYYY (date du jour).
+  • heure            : chaîne au format HH:mm (heure du serveur).
+  • objet            : chaîne. Contexte et objectif principal de la conversation.
+  • participants     : liste de chaînes. Nom ou rôle de chaque intervenant.
+  • pointsCles       : liste de chaînes. 3 à 5 points essentiels discutés.
+  • prochainesEtapes : liste de chaînes. Actions à planifier suite à la réunion.
+  • actionsARealiser : liste de chaînes. Tâches concrètes à réaliser immédiatement.
+  • conclusion       : chaîne. Synthèse finale et recommandation.
+
+**Contraintes de style** :  
+- Rédige chaque valeur en phrases complètes, claires et professionnelles.  
+- N’utilise pas de balises Markdown, ne renvoie que l’objet JSON.  
+- Respecte strictement la syntaxe JSON (virgules, guillemets).  
+
+Transcription :  
+${text}
+`.trim();
   const chat = ai.chats.create({ model:'gemini-2.0-flash-001', config:generationConfig });
   let out = '';
   for await (const chunk of await chat.sendMessageStream({ message:{ text:prompt } })) {
