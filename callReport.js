@@ -216,24 +216,27 @@ router.post('/', async (req, res) => {
 
     // 2️⃣ On génère le rapport à partir du template
     if (!templateBuffer) throw new Error('Template not loaded');
+
     const zip = new PizZip(templateBuffer);
     const tpl = new Docxtemplater(zip, {
-    paragraphLoop: true,
-    linebreaks: true,
-    delimiters: { start: '[%', end: '%]' }
-    });
+      paragraphLoop: true,
+      linebreaks: true,
+      delimiters: { start: '[%', end: '%]' }
+      });
+
     tpl.render({
-      TITRE:    data.titre,
-      DATE:     data.date.replace(/_/g, '/'),  // pour afficher “JJ/MM/AAAA” dans le document
-      HEURE:    data.heure,
-      OBJET:    data.objet,
-      PARTICIPANTS: (data.participants||[]).join('\n'),
-      POINTS_CLES:   (data.pointsCles||[]).join('\n'),
-      PROCHAINES_ETAPES: (data.prochainesEtapes||[]).join('\n'),
-      ACTIONS_A_REALISER: (data.actionsARealiser||[]).join('\n'),
-      CONCLUSION: data.conclusion
-    });
-    const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
+    TITRE:             data.titre,
+    DATE:              data.date.replace(/_/g, '/'),  // JJ_MM_AAAA → JJ/MM/AAAA
+    HEURE:             data.heure,
+    OBJET:             data.objet,
+    PARTICIPANTS:      data.participants || [],       // ← tableau brut
+    pointsCles:        data.pointsCles   || [],       // ← tableau brut
+    prochainesEtapes:  data.prochainesEtapes || [],   // ← tableau brut
+    ACTIONS_A_REALISER:  data.actionsARealiser || [],   // ← tableau brut
+    CONCLUSION:        data.conclusion
+  });
+  const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
+
 
 
 
