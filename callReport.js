@@ -121,8 +121,8 @@ async function transcribe(gsUri) {
 async function summarizeText(text) {
   console.log('[callReport] Summarizing via AI');
   const prompt = `
-Tu es un assistant spécialisé en comptes rendus professionnels, expert en finance personnelle. 
-À partir de la transcription ci-dessous, génère un objet JSON parfaitement formatté comprenant les clés suivantes :
+Tu es un assistant spécialisé en comptes rendus professionnels, expert en finance personnelle.
+À partir de la transcription ci-dessous, génère un objet JSON parfaitement formaté comprenant les clés suivantes :
 
   • titre            : chaîne. Titre concis du compte-rendu.
   • date             : chaîne au format JJ_MM_YYYY (date du jour).
@@ -134,30 +134,42 @@ Tu es un assistant spécialisé en comptes rendus professionnels, expert en fina
   • actionsARealiser : liste de chaînes. Tâches concrètes à réaliser immédiatement.
   • conclusion       : chaîne. Synthèse finale et recommandation.
 
-**Contraintes de style** :  
-- Rédige chaque valeur en phrases complètes, claires et professionnelles.  
-- N’utilise pas de balises Markdown, ne renvoie que l’objet JSON.  
-- Respecte strictement la syntaxe JSON (virgules, guillemets).  
+**Contraintes de style** :
+- Rédige chaque valeur en phrases complètes, claires et professionnelles.
+- N’utilise pas de balises Markdown, ne renvoie que l’objet JSON.
+- Respecte strictement la syntaxe JSON (virgules, guillemets).
 
-Transcription :  
+Transcription :
 ${text}
 `.trim();
-  const chat = ai.chats.create({ model:'gemini-2.0-flash-001', config:generationConfig });
+
+  const chat = ai.chats.create({ model: 'gemini-2.0-flash-001', config: generationConfig });
   let out = '';
-  for await (const chunk of await chat.sendMessageStream({ message:{ text:prompt } })) {
+  for await (const chunk of await chat.sendMessageStream({ message: { text: prompt } })) {
     if (chunk.text) out += chunk.text;
   }
   console.log('[callReport] Raw structured summary =', out);
-  const clean = out.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
+
+  const clean = out
+    .replace(/^```(?:json)?\s*/, '')
+    .replace(/\s*```$/, '')
+    .trim();
   console.log('[callReport] Clean JSON =', clean);
-  try { return JSON.parse(clean); }
-  catch {
+
+  try {
+    return JSON.parse(clean);
+  } catch {
     const now = new Date();
     return {
-      titre:'Compte Rendu',
-      date: now.toLocaleDateString('fr-FR'),
-      heure: now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),
-      objet:'', participants:[], pointsCles:[], prochainesEtapes:[], actionsARealiser:[], conclusion:text
+      titre:            'Compte Rendu',
+      date:             now.toLocaleDateString('fr-FR'),
+      heure:            now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      objet:            '',
+      participants:     [],
+      pointsCles:       [],
+      prochainesEtapes: [],
+      actionsARealiser: [],
+      conclusion:       text
     };
   }
 }
@@ -168,7 +180,7 @@ router.post('/', async (req, res) => {
   try {
     const { recordingId, conversationId, memberId } = req.body;
     if (!recordingId || !conversationId || !memberId) {
-      return res.status(400).json({ error:'recordingId, conversationId et memberId sont requis' });
+      return res.status(400).json({ error: 'recordingId, conversationId et memberId sont requis' });
     }
 
     // 1) Wait → Download → Save audio
@@ -176,9 +188,11 @@ router.post('/', async (req, res) => {
     const dlUrl    = await getDownloadLink(recordingId);
     const audioBuf = await downloadBuffer(dlUrl);
     const audioPath = `temp_audio/${conversationId}_${Date.now()}.webm`;
-    await saveBuffer(audioBuf, audioPath,'audio/webm');
+    await saveBuffer(audioBuf, audioPath, 'audio/webm');
     await db.collection('audioRecordings').add({
-      conversationId, fileName:audioPath, mimeType:'audio/webm',
+      conversationId,
+      fileName: audioPath,
+      mimeType: 'audio/webm',
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
@@ -186,97 +200,91 @@ router.post('/', async (req, res) => {
     const transcription = await transcribe(`gs://${bucket.name}/${audioPath}`);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
     const docTrans = new Document({
-      sections:[{
-        children:[
-          new Paragraph({ text:'Transcription', heading:HeadingLevel.HEADING_2 }),
-          new Paragraph({ text:transcription })
+      sections: [{
+        children: [
+          new Paragraph({ text: 'Transcription', heading: HeadingLevel.HEADING_2 }),
+          new Paragraph({ text: transcription })
         ]
       }]
     });
     const bufDoc = await Packer.toBuffer(docTrans);
-    await saveBuffer(bufDoc, txtPath,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    await saveBuffer(bufDoc, txtPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     await db.collection('transcriptions').add({
-      conversationId, fileName:txtPath, transcription,
+      conversationId,
+      fileName: txtPath,
+      transcription,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
     // 3) Générer le résumé structuré
     const data = await summarizeText(transcription);
 
-    // 1️⃣ On fixe la date de façon fiable
+    // 1️⃣ On fixe la date et l’heure de façon fiable
     const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth()+1).padStart(2, '0');
-    const year = String(now.getFullYear());
-    data.date = `${day}_${month}_${year}`;     // remplace data.date IA
-    data.heure = now.toLocaleTimeString('fr-FR', { 
-      hour:   '2-digit',
-      minute: '2-digit'
-      });
+    const day   = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year  = String(now.getFullYear());
+    data.date  = `${day}_${month}_${year}`; // remplace la date IA
+    data.heure = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
-    // 2️⃣ On génère le rapport à partir du template
-if (!templateBuffer) throw new Error('Template not loaded');
+    // 2️⃣ On nettoie les proofs errors du template
+    const zip = new PizZip(templateBuffer);
+    const docXmlPath = 'word/document.xml';
+    let xml = zip.file(docXmlPath).asText();
+    xml = xml
+      .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g, '')
+      .replace(/<w:proofErr\b[^>]*\/>/g, '');
+    zip.file(docXmlPath, xml);
 
-// 1) On dézippe le buffer et on nettoie word/document.xml
-const zip = new PizZip(templateBuffer);
-const docXmlPath = 'word/document.xml';
-let xml = zip.file(docXmlPath).asText();
+    // 3️⃣ On instancie Docxtemplater
+    const tpl = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      delimiters: { start: '[%', end: '%]' }
+    });
 
-// Retirer les balises <w:proofErr ...>...</w:proofErr> et les formes self-closing
-xml = xml
-  .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g, '')
-  .replace(/<w:proofErr\b[^>]*\/>/g, '');
+    // 4️⃣ On formate les listes
+    const points = (data.pointsCles || [])
+      .map(p => `• ${p}`)
+      .join('\n');
+    const etapes = (data.prochainesEtapes || [])
+      .map((step, i) => `${i + 1}. ${step}`)
+      .join('\n');
 
-// On réinjecte le XML nettoyé dans le zip
-zip.file(docXmlPath, xml);
+    // 5️⃣ On renderise
+    tpl.render({
+      TITRE:              data.titre,
+      DATE:               data.date.replace(/_/g, '/'),
+      HEURE:              data.heure,
+      OBJET:              data.objet,
+      PARTICIPANTS:       (data.participants || []).join('\n'),
+      POINTS_CLES:        points,
+      PROCHAINES_ETAPES:  etapes,
+      ACTIONS_A_REALISER: (data.actionsARealiser || []).join('\n'),
+      CONCLUSION:         data.conclusion
+    });
 
-// 2) On peut maintenant instancier Docxtemplater sans erreur de "proofErr"
-const tpl = new Docxtemplater(zip, {
-  paragraphLoop: true,
-  linebreaks: true,
-  delimiters: { start: '[%', end: '%]' }
-});
+    const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
 
-// 3) On prépare nos listes en bullets et numéros
-const points = (data.pointsCles||[]).map(p => `• ${p}`).join('\n');
-const etapes = (data.prochainesEtapes||[])
-  .map((step,i) => `${i+1}. ${step}`)
-  .join('\n');
-
-// 4) On renderise
-tpl.render({
-  TITRE:             data.titre,
-  DATE:              data.date.replace(/_/g,'/'),
-  HEURE:             data.heure,
-  OBJET:             data.objet,
-  PARTICIPANTS:      (data.participants||[]).join('\n'),
-  POINTS_CLES:       points,
-  PROCHAINES_ETAPES: etapes,
-  ACTIONS_A_REALISER:(data.actionsARealiser||[]).join('\n'),
-  CONCLUSION:        data.conclusion
-});
-
-// 5) On génère le buffer final
-const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
-
-
-
-
-    // 5) Enregistrer sous member-specific folder
-    // -> on remplace les "/" et espaces de la date par "_"
+    // 6️⃣ Enregistrer sous member-specific folder
     const reportName = `Rapport_IA_du_${data.date}.docx`;
-    const reportPath = `Rapport_Daily_AI/Rapport_de_${req.body.memberId}/${reportName}`;
+    const reportPath = `Rapport_Daily_AI/Rapport_de_${memberId}/${reportName}`;
 
-    // 4️⃣ Sauvegarde
-    await saveBuffer(bufOut,
-                reportPath,
-                'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    await db.collection('Rapport_Daily_AI')
-        .add({ conversationId, fileName: reportPath, ...data,
-               consent:true,
-               createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    await saveBuffer(
+      bufOut,
+      reportPath,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    );
+    await db.collection('Rapport_Daily_AI').add({
+      conversationId,
+      memberId,
+      fileName: reportPath,
+      ...data,
+      consent: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
 
-    res.json({ success:true, transcriptionDoc:txtPath, summaryDoc:reportPath });
+    res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: reportPath });
   } catch (err) {
     console.error('[callReport] ERROR', err);
     res.status(500).json({ error: err.message });
