@@ -215,33 +215,49 @@ router.post('/', async (req, res) => {
       });
 
     // 2️⃣ On génère le rapport à partir du template
-    if (!templateBuffer) throw new Error('Template not loaded');
+if (!templateBuffer) throw new Error('Template not loaded');
 
-    const zip = new PizZip(templateBuffer);
-    const tpl = new Docxtemplater(zip, {
-      paragraphLoop: true,
-      linebreaks: true,
-      delimiters: { start: '[%', end: '%]' }
-      });
+// 1) On dézippe le buffer et on nettoie word/document.xml
+const zip = new PizZip(templateBuffer);
+const docXmlPath = 'word/document.xml';
+let xml = zip.file(docXmlPath).asText();
 
-    tpl.render({
-    TITRE:             data.titre,
-    DATE:              data.date.replace(/_/g, '/'),
-    HEURE:             data.heure,
-    OBJET:             data.objet,
-    PARTICIPANTS:      (data.participants||[]).join('\n'),
-    // on ajoute des « • » devant chaque point
-    POINTS_CLES:    (data.pointsCles||[])
-                      .map(p => `• ${p}`)
-                      .join('\n'),
-    // on numérote les étapes (« 1. … », « 2. … »)
-    PROCHAINES_ETAPES: (data.prochainesEtapes||[])
-                        .map((step, i) => `${i+1}. ${step}`)
-                        .join('\n'),
-    ACTIONS_A_REALISER: (data.actionsARealiser||[]).join('\n'),
-    CONCLUSION:        data.conclusion
-    }); 
-  const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
+// Retirer les balises <w:proofErr ...>...</w:proofErr> et les formes self-closing
+xml = xml
+  .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g, '')
+  .replace(/<w:proofErr\b[^>]*\/>/g, '');
+
+// On réinjecte le XML nettoyé dans le zip
+zip.file(docXmlPath, xml);
+
+// 2) On peut maintenant instancier Docxtemplater sans erreur de "proofErr"
+const tpl = new Docxtemplater(zip, {
+  paragraphLoop: true,
+  linebreaks: true,
+  delimiters: { start: '[%', end: '%]' }
+});
+
+// 3) On prépare nos listes en bullets et numéros
+const points = (data.pointsCles||[]).map(p => `• ${p}`).join('\n');
+const etapes = (data.prochainesEtapes||[])
+  .map((step,i) => `${i+1}. ${step}`)
+  .join('\n');
+
+// 4) On renderise
+tpl.render({
+  TITRE:             data.titre,
+  DATE:              data.date.replace(/_/g,'/'),
+  HEURE:             data.heure,
+  OBJET:             data.objet,
+  PARTICIPANTS:      (data.participants||[]).join('\n'),
+  POINTS_CLES:       points,
+  PROCHAINES_ETAPES: etapes,
+  ACTIONS_A_REALISER:(data.actionsARealiser||[]).join('\n'),
+  CONCLUSION:        data.conclusion
+});
+
+// 5) On génère le buffer final
+const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
 
 
 
