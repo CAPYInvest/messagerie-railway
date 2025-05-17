@@ -94,7 +94,15 @@ async function downloadBuffer(url) {
 async function saveBuffer(buf, path, contentType) {
   console.log(`[callReport] Saving ${path}`);
   const file = bucket.file(path);
-  await file.save(buf, { metadata: { contentType } });
+  // extrait juste le nom final
+  const filename = path.split('/').pop();
+  await file.save(buf, {
+    metadata: {
+      contentType,
+      // ce metadata sera utilisé par Firebase Console et par les signed URLs
+      contentDisposition: `attachment; filename="${filename}"`
+    }
+  });
   return `gs://${bucket.name}/${path}`;
 }
 
@@ -182,6 +190,10 @@ router.post('/', async (req, res) => {
     const month = String(now.getMonth()+1).padStart(2, '0');
     const year = String(now.getFullYear());
     data.date = `${day}_${month}_${year}`;     // remplace data.date IA
+    data.heure = now.toLocaleTimeString('fr-FR', { 
+      hour:   '2-digit',
+      minute: '2-digit'
+      });
 
     // 2️⃣ On génère le rapport à partir du template
     if (!templateBuffer) throw new Error('Template not loaded');
