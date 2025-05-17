@@ -179,7 +179,11 @@ router.post('/', async (req, res) => {
     // 4) Remplir le template
     if (!templateBuffer) throw new Error('Template not loaded');
     const zip = new PizZip(templateBuffer);
-    const tpl = new Docxtemplater(zip, { paragraphLoop:true, linebreaks:true });
+    const tpl = new Docxtemplater(zip, {
+    paragraphLoop: true,
+    linebreaks: true,
+    delimiters: { start: '[%', end: '%]' }
+    });
 
     tpl.render({
       TITRE: data.titre,
