@@ -221,31 +221,24 @@ router.post('/', async (req, res) => {
     data.date  = `${day}_${month}_${year}`;
     data.heure = now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 
-   // 5️⃣ Génération du rapport via docx (et plus via template)
-const { Document, Packer, Paragraph, HeadingLevel, AlignmentType } = require('docx');
-
-// On définit une numérotation « décimale » pour les prochaines étapes
+   // 5️⃣ Génération du rapport via docx (plus de template Word)
 const numberingConfig = {
-  config: [
-    {
-      reference: "numbered-list",
-      levels: [
-        {
-          level: 0,
-          format: "decimal",
-          text: "%1.",
-          alignment: AlignmentType.START,
-        },
-      ],
-    },
-  ],
+  config: [{
+    reference: "numbered-list",
+    levels: [{
+      level: 0,
+      format: "decimal",
+      text: "%1.",
+      alignment: AlignmentType.START,
+    }],
+  }],
 };
 
 const doc = new Document({
   numbering: numberingConfig,
   sections: [{
     children: [
-      // Titre principal
+      // Titre
       new Paragraph({ text: data.titre, heading: HeadingLevel.HEADING_1 }),
 
       // Date & heure
@@ -270,7 +263,7 @@ const doc = new Document({
 
       // Prochaines étapes (numérotées)
       new Paragraph({ text: "Prochaines étapes", heading: HeadingLevel.HEADING_2 }),
-      ...data.prochainesEtapes.map((step, i) =>
+      ...data.prochainesEtapes.map(step =>
         new Paragraph({
           text: step,
           numbering: { reference: "numbered-list", level: 0 }
@@ -290,7 +283,7 @@ const doc = new Document({
   }]
 });
 
-// On génère le buffer .docx
+// génère le buffer .docx
 const bufOut = await Packer.toBuffer(doc);
 
 // 6️⃣ Sauvegarde dans le dossier member-specific
@@ -301,6 +294,7 @@ await saveBuffer(
   reportPath,
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 );
+
 await db.collection('Rapport_Daily_AI').add({
   conversationId,
   fileName: reportPath,
