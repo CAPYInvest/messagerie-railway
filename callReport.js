@@ -221,30 +221,35 @@ data.heure = now.toLocaleTimeString('fr-FR', {
   timeZone: 'Europe/Paris'
 });
 
-// 5) Préparation des listes avec tabulation avant/après puce/numéro
+// 5) Génération d’un ID aléatoire à 6 chiffres pour éviter les collisions
+const uniqueId = Math.floor(100000 + Math.random()*900000);
+
+// 6) Préparation des listes avec tabulation + puce + double espace + texte
 const participantsList = (data.participants||[])
-  .map(p => `\t•\t${p}`)
+  .map(p => `\t•  ${p}`)
   .join('\n');
-const pointsList = (data.pointsCles||[])
-  .map(p => `\t•\t${p}`)
+const pointsList       = (data.pointsCles||[])
+  .map(p => `\t•  ${p}`)
   .join('\n');
-const etapesList = (data.prochainesEtapes||[])
-  .map((s,i) => `\t${i+1}.\t${s}`)
+const etapesList       = (data.prochainesEtapes||[])
+  .map((s,i)=> `\t${i+1}.  ${s}`)
+  .join('\n');
+const actionsList      = (data.actionsARealiser||[])
+  .map(a=> `\t•  ${a}`)
   .join('\n');
 
     // 6) Génération du rapport DOCX via votre template
     if (!templateBuffer) throw new Error('Template non chargé');
 
-    // — Nettoyage automatique des numérotations dans XML —
-    const zip = new PizZip(templateBuffer);
-    let xml = zip.file('word/document.xml').asText();
-    xml = xml
-      .replace(/<w:numPr>[\s\S]*?<\/w:numPr>/g, '')
-      .replace(/<w:ilvl w:val="[^"]*"\/>/g, '')
-      .replace(/<w:numId w:val="[^"]*"\/>/g, '')
-      .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g, '')
-      .replace(/<w:proofErr\b[^>]*\/>/g, '');
-    zip.file('word/document.xml', xml);
+// 7) Nettoyage & instanciation Docxtemplater (idem)
+const zip = new PizZip(templateBuffer);
+let xml = zip.file('word/document.xml').asText();
+xml = xml
+  .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g,'')
+  .replace(/<w:proofErr\b[^>]*\/>/g,'')
+  .replace(/<w:instrText\b[^>]*>[\s\S]*?<\/w:instrText>/g,'')
+  .replace(/<w:fldSimple\b[^>]*\/>/g,'');
+zip.file('word/document.xml', xml);
 
     // — Instanciation Docxtemplater sur template nettoyé —
     const tpl = new Docxtemplater(zip, {
@@ -253,27 +258,35 @@ const etapesList = (data.prochainesEtapes||[])
       delimiters: { start:'[%', end:'%]' }
     });
 
+
+    // 8) Si vous voulez absolument justifier la conclusion via raw XML
+const conclusionXml = `
+<w:p>
+  <w:pPr><w:jc w:val="both"/></w:pPr>
+  <w:r><w:t xml:space="preserve">${data.conclusion}</w:t></w:r>
+</w:p>
+`.trim();
+
     // — Préparation des listes —
     const points = (data.pointsCles||[]).map(p=>'• '+p).join('\n');
     const etapes = (data.prochainesEtapes||[]).map((s,i)=>(i+1)+'. '+s).join('\n');
 
-  // 7) Remplissage des placeholders
+  // 9) Remplissage des placeholders
 tpl.render({
   TITRE:             data.titre,
   DATE:              data.date.replace(/_/g,'/'),
   HEURE:             data.heure,
-  OBJET:             data.objet,              // 👉 la couleur du texte "Objet" se gère dans votre template Word (format de la zone [%OBJET%])
+  OBJET:             data.objet,             // 👉 la couleur se gère dans le template
   PARTICIPANTS:      participantsList,
   POINTS_CLES:       pointsList,
   PROCHAINES_ETAPES: etapesList,
-  ACTIONS_A_REALISER:(data.actionsARealiser||[]).map(a=>`\t•\t${a}`).join('\n'),
-  CONCLUSION:        data.conclusion
+  ACTIONS_A_REALISER:actionsList,
+  CONCLUSION:        { _raw: conclusionXml } // insertion de XML justifié
 });
-
     const bufOut = tpl.getZip().generate({ type:'nodebuffer' });
 
     // 6) Sauvegarde member‐specific
-    const reportName = `Rapport_IA_du_${data.date}.docx`;
+    const reportName = `Rapport_IA_du_${data.date}_ID_${uniqueId}.docx`;
     const reportPath = `Rapport_Daily_AI/Rapport_de_${memberId}/${reportName}`;
     await saveBuffer(bufOut, reportPath,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     await db.collection('Rapport_Daily_AI').add({
