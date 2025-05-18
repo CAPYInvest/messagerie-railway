@@ -111,49 +111,72 @@ async function transcribe(gsUri) {
   return res.results.map(r=>r.alternatives[0].transcript).join('\n');
 }
 
-// ——— Résumé structuré via GenAI ———
+// --- Résumé structuré via GenAI ---
 async function summarizeText(text) {
   console.log('[callReport] Summarizing via AI');
   const prompt = `
-Tu es un assistant comptable expert en finance personnelle.
-À partir de cette transcription, génère **uniquement** un objet JSON strictement valide contenant :
-• titre            : chaîne.
-• objet            : chaîne.
-• participants     : liste de chaînes.
-• pointsCles       : liste de chaînes (3–5 points clés).
-• prochainesEtapes : liste de chaînes.
-• actionsARealiser : liste de chaînes.
-• conclusion       : chaîne.
-
-Ne renvoie **que** l’objet JSON, sans balises Markdown ni texte additionnel.
+Tu es un assistant expert en comptes rendus professionnels.
+À partir de cette transcription, renvoie **uniquement** un objet JSON parfaitement valide, sans balises Markdown, contenant :
+  • titre            : chaîne.
+  • objet            : chaîne.
+  • participants     : tableau de chaînes.
+  • pointsCles       : tableau de chaînes.
+  • prochainesEtapes : tableau de chaînes.
+  • actionsARealiser : tableau de chaînes.
+  • conclusion       : chaîne.
 
 Transcription :
 ${text}
 `.trim();
 
+  // envoi au modèle
   const chat = ai.chats.create({ model:'gemini-2.0-flash-001', config:generationConfig });
-  let out = '';
+  let raw = '';
   for await (const chunk of await chat.sendMessageStream({ message:{ text:prompt } })) {
-    if (chunk.text) out += chunk.text;
+    if (chunk.text) raw += chunk.text;
   }
-  console.log('[callReport] Raw structured summary =', out);
-  const clean = out.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'').trim();
-  console.log('[callReport] Clean JSON =', clean);
+  console.log('[callReport] Raw structured summary =', raw);
 
+  // on enlève d’éventuels ```json … ```
+  let clean = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
+
+  // on extrait JUSTE le bloc JSON {…}
+  const m = clean.match(/\{[\s\S]*\}/);
+  const jsonString = m ? m[0] : clean;
+  console.log('[callReport] Extracted JSON =', jsonString);
+
+  // données de secours
+  const fallback = {
+    titre:            'Compte Rendu',
+    objet:            '',
+    participants:     [],
+    pointsCles:       [],
+    prochainesEtapes: [],
+    actionsARealiser: [],
+    conclusion:       text
+  };
+
+  let data;
   try {
-    return JSON.parse(clean);
-  } catch (e) {
-    console.warn('[callReport] JSON parse failed, falling back', e);
-    return {
-      titre:'Compte Rendu',
-      objet:'',
-      participants:[],
-      pointsCles:[],
-      prochainesEtapes:[],
-      actionsARealiser:[],
-      conclusion:text
-    };
+    data = JSON.parse(jsonString);
+  } catch (err) {
+    console.warn('[callReport] JSON.parse failed, using fallback:', err);
+    data = { ...fallback };
   }
+
+  // on s’assure que chaque clé existe et est du bon type
+  return {
+    titre:            typeof data.titre === 'string'      ? data.titre            : fallback.titre,
+    objet:            typeof data.objet === 'string'      ? data.objet            : fallback.objet,
+    participants:     Array.isArray(data.participants)    ? data.participants     : fallback.participants,
+    pointsCles:       Array.isArray(data.pointsCles)      ? data.pointsCles       : fallback.pointsCles,
+    prochainesEtapes: Array.isArray(data.prochainesEtapes)? data.prochainesEtapes : fallback.prochainesEtapes,
+    actionsARealiser: Array.isArray(data.actionsARealiser)? data.actionsARealiser : fallback.actionsARealiser,
+    conclusion:       typeof data.conclusion === 'string'? data.conclusion       : fallback.conclusion,
+    // date & heure seront recalc ultérieurement côté serveur
+    date:             data.date,
+    heure:            data.heure
+  };
 }
 
 // ——— Express router ———
