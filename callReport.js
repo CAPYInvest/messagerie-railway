@@ -221,52 +221,96 @@ router.post('/', async (req, res) => {
     data.date  = `${day}_${month}_${year}`;
     data.heure = now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 
-    // 5) Rendu du template (avec nettoyage des balises gênantes)
-    if (!templateBuffer) throw new Error('Template non chargé');
-    const zip = new PizZip(templateBuffer);
-    let xml = zip.file('word/document.xml').asText();
-    xml = xml
-      .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g,'')
-      .replace(/<w:proofErr\b[^>]*\/>/g,'')
-      .replace(/<w:instrText\b[^>]*>[\s\S]*?<\/w:instrText>/g,'')
-      .replace(/<w:fldSimple\b[^>]*\/>/g,'');
-    zip.file('word/document.xml', xml);
+   // 5️⃣ Génération du rapport via docx (et plus via template)
+const { Document, Packer, Paragraph, HeadingLevel, AlignmentType } = require('docx');
 
-    const tpl = new Docxtemplater(zip, {
-      paragraphLoop: true,
-      linebreaks: true,
-      delimiters: { start:'[%', end:'%]' }
-    });
+// On définit une numérotation « décimale » pour les prochaines étapes
+const numberingConfig = {
+  config: [
+    {
+      reference: "numbered-list",
+      levels: [
+        {
+          level: 0,
+          format: "decimal",
+          text: "%1.",
+          alignment: AlignmentType.START,
+        },
+      ],
+    },
+  ],
+};
 
-    // Listes formatées en JS
-    const points = (data.pointsCles||[]).map(p => '• '+p).join('\n');
-    const etapes = (data.prochainesEtapes||[]).map((s,i)=>(i+1)+'. '+s).join('\n');
+const doc = new Document({
+  numbering: numberingConfig,
+  sections: [{
+    children: [
+      // Titre principal
+      new Paragraph({ text: data.titre, heading: HeadingLevel.HEADING_1 }),
 
-    tpl.render({
-      TITRE:             data.titre,
-      DATE:              data.date.replace(/_/g,'/'),
-      HEURE:             data.heure,
-      OBJET:             data.objet,
-      PARTICIPANTS:      (data.participants||[]).join('\n'),
-      POINTS_CLES:       points,
-      PROCHAINES_ETAPES: etapes,
-      ACTIONS_A_REALISER:(data.actionsARealiser||[]).join('\n'),
-      CONCLUSION:        data.conclusion
-    });
+      // Date & heure
+      new Paragraph({ text: `Date : ${data.date.replace(/_/g,'/')}` }),
+      new Paragraph({ text: `Heure : ${data.heure}` }),
 
-    const bufOut = tpl.getZip().generate({ type:'nodebuffer' });
+      // Objet
+      new Paragraph({ text: "Objet", heading: HeadingLevel.HEADING_2 }),
+      new Paragraph({ text: data.objet }),
 
-    // 6) Sauvegarde dans dossier spécifique au member
-    const reportName = `Rapport_IA_du_${data.date}.docx`;
-    const reportPath = `Rapport_Daily_AI/Rapport_de_${memberId}/${reportName}`;
-    await saveBuffer(bufOut, reportPath,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    await db.collection('Rapport_Daily_AI').add({
-      conversationId, fileName:reportPath, memberId,
-      ...data, consent:true,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+      // Participants
+      new Paragraph({ text: "Participants", heading: HeadingLevel.HEADING_2 }),
+      ...data.participants.map(p =>
+        new Paragraph({ text: p, bullet: { level: 0 } })
+      ),
 
-    res.json({ success:true, transcriptionDoc:txtPath, summaryDoc:reportPath });
+      // Points clés
+      new Paragraph({ text: "Points clés", heading: HeadingLevel.HEADING_2 }),
+      ...data.pointsCles.map(p =>
+        new Paragraph({ text: p, bullet: { level: 0 } })
+      ),
+
+      // Prochaines étapes (numérotées)
+      new Paragraph({ text: "Prochaines étapes", heading: HeadingLevel.HEADING_2 }),
+      ...data.prochainesEtapes.map((step, i) =>
+        new Paragraph({
+          text: step,
+          numbering: { reference: "numbered-list", level: 0 }
+        })
+      ),
+
+      // Actions à réaliser
+      new Paragraph({ text: "Actions à réaliser", heading: HeadingLevel.HEADING_2 }),
+      ...data.actionsARealiser.map(a =>
+        new Paragraph({ text: a, bullet: { level: 0 } })
+      ),
+
+      // Conclusion
+      new Paragraph({ text: "Conclusion", heading: HeadingLevel.HEADING_2 }),
+      new Paragraph({ text: data.conclusion }),
+    ]
+  }]
+});
+
+// On génère le buffer .docx
+const bufOut = await Packer.toBuffer(doc);
+
+// 6️⃣ Sauvegarde dans le dossier member-specific
+const reportName = `Rapport_IA_du_${data.date}.docx`;
+const reportPath = `Rapport_Daily_AI/Rapport_de_${memberId}/${reportName}`;
+await saveBuffer(
+  bufOut,
+  reportPath,
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+);
+await db.collection('Rapport_Daily_AI').add({
+  conversationId,
+  fileName: reportPath,
+  memberId,
+  ...data,
+  consent: true,
+  createdAt: admin.firestore.FieldValue.serverTimestamp()
+});
+
+res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: reportPath });
 
   } catch (err) {
     console.error('[callReport] ERROR', err);
