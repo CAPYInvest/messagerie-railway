@@ -8,7 +8,8 @@ const Docxtemplater = require('docxtemplater');
 const { SpeechClient } = require('@google-cloud/speech');
 const { GoogleGenAI } = require('@google/genai');
 const admin = require('firebase-admin');
-const { Document, Packer, Paragraph, HeadingLevel } = require('docx');
+const { Document, Packer, Paragraph, HeadingLevel, AlignmentType } = require('docx');
+
 
 // — Auth Google VertexAI via ADC —
 if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
