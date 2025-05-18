@@ -3,23 +3,23 @@ require('dotenv').config();
 const fs = require('fs');
 const express = require('express');
 const axios = require('axios');
+const PizZip = require('pizzip');
+const Docxtemplater = require('docxtemplater');
 const { SpeechClient } = require('@google-cloud/speech');
 const { GoogleGenAI } = require('@google/genai');
 const admin = require('firebase-admin');
-const PizZip = require('pizzip');
-const Docxtemplater = require('docxtemplater');
 const { Document, Packer, Paragraph, HeadingLevel } = require('docx');
 
-// --- ADC pour Vertex AI ---
+// ——— Auth Google VertexAI via ADC ———
 if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
   const creds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
-  const tmpPath = '/tmp/vertex-service-account.json';
+  const tmpPath = '/tmp/vertex.json';
   fs.writeFileSync(tmpPath, JSON.stringify(creds));
   process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
-  console.log('[callReport] Wrote AI creds to', tmpPath);
+  console.log('[callReport] VertexAI creds written to', tmpPath);
 }
 
-// --- Firebase ---
+// ——— Firebase Admin init ———
 const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 fbCred.private_key = fbCred.private_key.replace(/\\n/g, '\n');
 if (!admin.apps.length) {
@@ -31,7 +31,7 @@ if (!admin.apps.length) {
 const bucket = admin.storage().bucket();
 const db = admin.firestore();
 
-// --- GenAI ---
+// ——— GenAI init ———
 const ai = new GoogleGenAI({
   vertexai: true,
   project: process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
@@ -50,7 +50,7 @@ const generationConfig = {
   ]
 };
 
-// --- Charger le template Word ---
+// ——— Chargement du template Word ———
 let templateBuffer = null;
 (async () => {
   try {
@@ -59,83 +59,73 @@ let templateBuffer = null;
     templateBuffer = buf;
     console.log('[callReport] Template loaded');
   } catch (err) {
-    console.error('[callReport] Failed to load template:', err);
+    console.error('[callReport] Could not load template:', err);
   }
 })();
 
-// --- Speech-to-Text ---
+// ——— Speech-to-Text client ———
 const stCred = JSON.parse(process.env.GOOGLE_SPEECH_TO_TEXT_SERVICE_ACCOUNT);
 stCred.private_key = stCred.private_key.replace(/\\n/g, '\n');
 const speechClient = new SpeechClient({ credentials: stCred, projectId: stCred.project_id });
 
-// --- Helpers (waitReady, getDownloadLink, downloadBuffer, saveBuffer) ---
+// ——— Helpers ———
 async function waitReady(recId, tries = 10, delay = 6000) {
   console.log(`[callReport] Waiting for recording ${recId}`);
   const headers = { Authorization: `Bearer ${process.env.DAILY_API_KEY}` };
   for (let i = 0; i < tries; i++) {
     const { data } = await axios.get(`https://api.daily.co/v1/recordings/${recId}`, { headers });
     console.log(`[callReport] Try ${i+1}/${tries}, status=`, data.status);
-    if (data.status === 'ready' || data.status === 'finished') return;
+    if (['ready','finished'].includes(data.status)) return;
     await new Promise(r => setTimeout(r, delay));
   }
-  throw new Error('Recording not ready');
+  throw new Error('Recording not ready in time');
 }
+
 async function getDownloadLink(recId) {
   console.log('[callReport] Generating download link');
   const headers = { Authorization: `Bearer ${process.env.DAILY_API_KEY}` };
   const { data } = await axios.get(`https://api.daily.co/v1/recordings/${recId}/access-link`, { headers });
   return data.download_link;
 }
+
 async function downloadBuffer(url) {
-  console.log('[callReport] Downloading audio');
+  console.log('[callReport] Downloading audio buffer');
   const resp = await axios.get(url, { responseType: 'arraybuffer' });
   return Buffer.from(resp.data);
 }
+
 async function saveBuffer(buf, path, contentType) {
   console.log(`[callReport] Saving ${path}`);
   const file = bucket.file(path);
-  // extrait juste le nom final
-  const filename = path.split('/').pop();
-  await file.save(buf, {
-    metadata: {
-      contentType,
-      // ce metadata sera utilisé par Firebase Console et par les signed URLs
-      contentDisposition: `attachment; filename="${filename}"`
-    }
-  });
+  await file.save(buf, { metadata:{ contentType } });
   return `gs://${bucket.name}/${path}`;
 }
 
-// --- Transcription ---
 async function transcribe(gsUri) {
   console.log('[callReport] Transcribing', gsUri);
   const [op] = await speechClient.longRunningRecognize({
     audio: { uri: gsUri },
-    config: { encoding:'WEBM_OPUS', sampleRateHertz:48000, languageCode:'fr-FR' }
+    config:{ encoding:'WEBM_OPUS', sampleRateHertz:48000, languageCode:'fr-FR' }
   });
   const [res] = await op.promise();
-  return res.results.map(r => r.alternatives[0].transcript).join('\n');
+  return res.results.map(r=>r.alternatives[0].transcript).join('\n');
 }
 
-// --- Résumé structuré via GenAI (DATE/HEURE supprimés) ---
+// ——— Résumé structuré via GenAI ———
 async function summarizeText(text) {
   console.log('[callReport] Summarizing via AI');
   const prompt = `
-Tu es un assistant spécialisé en comptes rendus professionnels, expert en finance personnelle.
-À partir de la transcription ci-dessous, génère **uniquement** un objet JSON parfaitement formaté comprenant les clés suivantes :
+Tu es un assistant comptable expert en finance personnelle.
+À partir de cette transcription, génère **uniquement** un objet JSON strictement valide contenant :
+• titre            : chaîne.
+• objet            : chaîne.
+• participants     : liste de chaînes.
+• pointsCles       : liste de chaînes (3–5 points clés).
+• prochainesEtapes : liste de chaînes.
+• actionsARealiser : liste de chaînes.
+• conclusion       : chaîne.
 
-  • titre            : chaîne. Titre concis du compte-rendu.
-  • objet            : chaîne. Contexte et objectif principal de la conversation.
-  • participants     : liste de chaînes. Nom ou rôle de chaque intervenant.
-  • pointsCles       : liste de chaînes. 3 à 5 points essentiels discutés.
-  • prochainesEtapes : liste de chaînes. Actions à planifier suite à la réunion.
-  • actionsARealiser : liste de chaînes. Tâches concrètes à réaliser immédiatement.
-  • conclusion       : chaîne. Synthèse finale et recommandation.
-
-**Contraintes de style** :
-- Rédige chaque valeur en phrases complètes, claires et professionnelles.
-- N’utilise pas de balises Markdown, ne renvoie que l’objet JSON.
-- Respecte strictement la syntaxe JSON (virgules, guillemets).
+Ne renvoie **que** l’objet JSON, sans balises Markdown ni texte additionnel.
 
 Transcription :
 ${text}
@@ -143,149 +133,129 @@ ${text}
 
   const chat = ai.chats.create({ model:'gemini-2.0-flash-001', config:generationConfig });
   let out = '';
-  for await (const chunk of await chat.sendMessageStream({ message:{ text: prompt } })) {
+  for await (const chunk of await chat.sendMessageStream({ message:{ text:prompt } })) {
     if (chunk.text) out += chunk.text;
   }
   console.log('[callReport] Raw structured summary =', out);
-
-  const clean = out
-    .replace(/^```(?:json)?\s*/, '')
-    .replace(/\s*```$/, '')
-    .trim();
+  const clean = out.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,'').trim();
   console.log('[callReport] Clean JSON =', clean);
 
   try {
     return JSON.parse(clean);
-  } catch {
-    const now = new Date();
+  } catch (e) {
+    console.warn('[callReport] JSON parse failed, falling back', e);
     return {
-      titre:            'Compte Rendu',
-      objet:            '',
-      participants:     [],
-      pointsCles:       [],
-      prochainesEtapes: [],
-      actionsARealiser: [],
-      conclusion:       text
+      titre:'Compte Rendu',
+      objet:'',
+      participants:[],
+      pointsCles:[],
+      prochainesEtapes:[],
+      actionsARealiser:[],
+      conclusion:text
     };
   }
 }
 
-
-// --- Route principale ---
+// ——— Express router ———
 const router = express.Router();
 router.post('/', async (req, res) => {
   try {
     const { recordingId, conversationId, memberId } = req.body;
     if (!recordingId || !conversationId || !memberId) {
-      return res.status(400).json({ error: 'recordingId, conversationId et memberId sont requis' });
+      return res.status(400).json({ error:'recordingId, conversationId et memberId requis' });
     }
 
-    // 1) Wait → Download → Save audio
+    // 1) attendre + télécharger + sauvegarder audio
     await waitReady(recordingId);
-    const dlUrl    = await getDownloadLink(recordingId);
+    const dlUrl = await getDownloadLink(recordingId);
     const audioBuf = await downloadBuffer(dlUrl);
     const audioPath = `temp_audio/${conversationId}_${Date.now()}.webm`;
-    await saveBuffer(audioBuf, audioPath, 'audio/webm');
+    await saveBuffer(audioBuf, audioPath,'audio/webm');
     await db.collection('audioRecordings').add({
-      conversationId,
-      fileName: audioPath,
-      mimeType: 'audio/webm',
+      conversationId, fileName:audioPath, mimeType:'audio/webm',
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    // 2) Transcription → DOCX
+    // 2) transcription → DOCX
     const transcription = await transcribe(`gs://${bucket.name}/${audioPath}`);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
     const docTrans = new Document({
-      sections: [{
-        children: [
-          new Paragraph({ text: 'Transcription', heading: HeadingLevel.HEADING_2 }),
-          new Paragraph({ text: transcription })
+      sections:[{
+        children:[
+          new Paragraph({ text:'Transcription', heading:HeadingLevel.HEADING_2 }),
+          new Paragraph({ text:transcription })
         ]
       }]
     });
     const bufDoc = await Packer.toBuffer(docTrans);
-    await saveBuffer(bufDoc, txtPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    await saveBuffer(bufDoc, txtPath,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     await db.collection('transcriptions').add({
-      conversationId,
-      fileName: txtPath,
-      transcription,
+      conversationId, fileName:txtPath, transcription,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    // 3) Générer le résumé structuré
+    // 3) résumé structuré
     const data = await summarizeText(transcription);
 
-    // 1️⃣ On fixe la date et l’heure de façon fiable
-const now = new Date();
-const day   = String(now.getDate()).padStart(2,'0');
-const month = String(now.getMonth()+1).padStart(2,'0');
-const year  = String(now.getFullYear());
-data.date  = `${day}_${month}_${year}`;  // date serveur
-data.heure = now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});  // heure serveur
+    // 4) date & heure 100 % serveurs
+    const now = new Date();
+    const day   = String(now.getDate()).padStart(2,'0');
+    const month = String(now.getMonth()+1).padStart(2,'0');
+    const year  = String(now.getFullYear());
+    data.date  = `${day}_${month}_${year}`;
+    data.heure = now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 
-
-    // 2️⃣ On nettoie les proofs errors du template
+    // 5) rendu du template
+    if (!templateBuffer) throw new Error('Template non chargé');
     const zip = new PizZip(templateBuffer);
-    const docXmlPath = 'word/document.xml';
-    let xml = zip.file(docXmlPath).asText();
+    let xml = zip.file('word/document.xml').asText();
+    // nettoyage des balises gênantes
     xml = xml
-      .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g, '')
-      .replace(/<w:proofErr\b[^>]*\/>/g, '');
-    zip.file(docXmlPath, xml);
+      .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g,'')
+      .replace(/<w:proofErr\b[^>]*\/>/g,'')
+      .replace(/<w:instrText\b[^>]*>[\s\S]*?<\/w:instrText>/g,'')
+      .replace(/<w:fldSimple\b[^>]*\/>/g,'');
+    zip.file('word/document.xml', xml);
 
-    // 3️⃣ On instancie Docxtemplater
     const tpl = new Docxtemplater(zip, {
       paragraphLoop: true,
       linebreaks: true,
-      delimiters: { start: '[%', end: '%]' }
+      delimiters: { start:'[%', end:'%]' }
     });
 
-    // 4️⃣ On formate les listes
-    const points = (data.pointsCles || [])
-      .map(p => `• ${p}`)
-      .join('\n');
-    const etapes = (data.prochainesEtapes || [])
-      .map((step, i) => `${i + 1}. ${step}`)
-      .join('\n');
+    // listes formatées
+    const points = (data.pointsCles||[]).map(p=>'• '+p).join('\n');
+    const etapes = (data.prochainesEtapes||[]).map((s,i)=>(i+1)+'. '+s).join('\n');
 
-    // 5️⃣ On renderise
     tpl.render({
-      TITRE:              data.titre,
-      DATE:               data.date.replace(/_/g, '/'),
-      HEURE:              data.heure,
-      OBJET:              data.objet,
-      PARTICIPANTS:       (data.participants || []).join('\n'),
-      POINTS_CLES:        points,
-      PROCHAINES_ETAPES:  etapes,
-      ACTIONS_A_REALISER: (data.actionsARealiser || []).join('\n'),
-      CONCLUSION:         data.conclusion
+      TITRE:             data.titre,
+      DATE:              data.date.replace(/_/g,'/'),
+      HEURE:             data.heure,
+      OBJET:             data.objet,
+      PARTICIPANTS:      (data.participants||[]).join('\n'),
+      POINTS_CLES:       points,
+      PROCHAINES_ETAPES: etapes,
+      ACTIONS_A_REALISER:(data.actionsARealiser||[]).join('\n'),
+      CONCLUSION:        data.conclusion
     });
 
-    const bufOut = tpl.getZip().generate({ type: 'nodebuffer' });
+    const bufOut = tpl.getZip().generate({ type:'nodebuffer' });
 
-    // 6️⃣ Enregistrer sous member-specific folder
+    // 6) sauvegarde dans dossier member-specific
     const reportName = `Rapport_IA_du_${data.date}.docx`;
     const reportPath = `Rapport_Daily_AI/Rapport_de_${memberId}/${reportName}`;
-
-    await saveBuffer(
-      bufOut,
-      reportPath,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    );
+    await saveBuffer(bufOut, reportPath,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     await db.collection('Rapport_Daily_AI').add({
-      conversationId,
-      memberId,
-      fileName: reportPath,
-      ...data,
-      consent: true,
+      conversationId, fileName:reportPath, memberId,
+      ...data, consent:true,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    res.json({ success: true, transcriptionDoc: txtPath, summaryDoc: reportPath });
+    res.json({ success:true, transcriptionDoc:txtPath, summaryDoc:reportPath });
+
   } catch (err) {
     console.error('[callReport] ERROR', err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || err.toString() });
   }
 });
 
