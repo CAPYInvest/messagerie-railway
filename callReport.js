@@ -10,7 +10,7 @@ const { GoogleGenAI } = require('@google/genai');
 const admin = require('firebase-admin');
 const { Document, Packer, Paragraph, HeadingLevel } = require('docx');
 
-// ——— Auth Google VertexAI via ADC ———
+// — Auth Google VertexAI via ADC —
 if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
   const creds = JSON.parse(process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT);
   const tmpPath = '/tmp/vertex.json';
@@ -19,7 +19,7 @@ if (process.env.GOOGLE_VERTEX_SERVICE_ACCOUNT) {
   console.log('[callReport] VertexAI creds written to', tmpPath);
 }
 
-// ——— Firebase Admin init ———
+// — Firebase Admin init —
 const fbCred = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 fbCred.private_key = fbCred.private_key.replace(/\\n/g, '\n');
 if (!admin.apps.length) {
@@ -31,7 +31,7 @@ if (!admin.apps.length) {
 const bucket = admin.storage().bucket();
 const db = admin.firestore();
 
-// ——— GenAI init ———
+// — GenAI init —
 const ai = new GoogleGenAI({
   vertexai: true,
   project: process.env.GOOGLE_VERTEX_AI_PROJECT_ID,
@@ -50,7 +50,7 @@ const generationConfig = {
   ]
 };
 
-// ——— Chargement du template Word ———
+// — Chargement du template Word —
 let templateBuffer = null;
 (async () => {
   try {
@@ -63,12 +63,12 @@ let templateBuffer = null;
   }
 })();
 
-// ——— Speech-to-Text client ———
+// — Speech-to-Text client —
 const stCred = JSON.parse(process.env.GOOGLE_SPEECH_TO_TEXT_SERVICE_ACCOUNT);
 stCred.private_key = stCred.private_key.replace(/\\n/g, '\n');
 const speechClient = new SpeechClient({ credentials: stCred, projectId: stCred.project_id });
 
-// ——— Helpers ———
+// — Helpers —
 async function waitReady(recId, tries = 10, delay = 6000) {
   console.log(`[callReport] Waiting for recording ${recId}`);
   const headers = { Authorization: `Bearer ${process.env.DAILY_API_KEY}` };
@@ -108,10 +108,10 @@ async function transcribe(gsUri) {
     config:{ encoding:'WEBM_OPUS', sampleRateHertz:48000, languageCode:'fr-FR' }
   });
   const [res] = await op.promise();
-  return res.results.map(r=>r.alternatives[0].transcript).join('\n');
+  return res.results.map(r => r.alternatives[0].transcript).join('\n');
 }
 
-// --- Résumé structuré via GenAI ---
+// — Résumé structuré via GenAI —
 async function summarizeText(text) {
   console.log('[callReport] Summarizing via AI');
   const prompt = `
@@ -129,7 +129,6 @@ Transcription :
 ${text}
 `.trim();
 
-  // envoi au modèle
   const chat = ai.chats.create({ model:'gemini-2.0-flash-001', config:generationConfig });
   let raw = '';
   for await (const chunk of await chat.sendMessageStream({ message:{ text:prompt } })) {
@@ -137,15 +136,11 @@ ${text}
   }
   console.log('[callReport] Raw structured summary =', raw);
 
-  // on enlève d’éventuels ```json … ```
   let clean = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
-
-  // on extrait JUSTE le bloc JSON {…}
   const m = clean.match(/\{[\s\S]*\}/);
   const jsonString = m ? m[0] : clean;
   console.log('[callReport] Extracted JSON =', jsonString);
 
-  // données de secours
   const fallback = {
     titre:            'Compte Rendu',
     objet:            '',
@@ -164,22 +159,20 @@ ${text}
     data = { ...fallback };
   }
 
-  // on s’assure que chaque clé existe et est du bon type
   return {
-    titre:            typeof data.titre === 'string'      ? data.titre            : fallback.titre,
-    objet:            typeof data.objet === 'string'      ? data.objet            : fallback.objet,
-    participants:     Array.isArray(data.participants)    ? data.participants     : fallback.participants,
-    pointsCles:       Array.isArray(data.pointsCles)      ? data.pointsCles       : fallback.pointsCles,
-    prochainesEtapes: Array.isArray(data.prochainesEtapes)? data.prochainesEtapes : fallback.prochainesEtapes,
-    actionsARealiser: Array.isArray(data.actionsARealiser)? data.actionsARealiser : fallback.actionsARealiser,
-    conclusion:       typeof data.conclusion === 'string'? data.conclusion       : fallback.conclusion,
-    // date & heure seront recalc ultérieurement côté serveur
+    titre:            typeof data.titre === 'string'       ? data.titre            : fallback.titre,
+    objet:            typeof data.objet === 'string'       ? data.objet            : fallback.objet,
+    participants:     Array.isArray(data.participants)     ? data.participants     : fallback.participants,
+    pointsCles:       Array.isArray(data.pointsCles)       ? data.pointsCles       : fallback.pointsCles,
+    prochainesEtapes: Array.isArray(data.prochainesEtapes) ? data.prochainesEtapes : fallback.prochainesEtapes,
+    actionsARealiser: Array.isArray(data.actionsARealiser) ? data.actionsARealiser : fallback.actionsARealiser,
+    conclusion:       typeof data.conclusion === 'string'  ? data.conclusion       : fallback.conclusion,
     date:             data.date,
     heure:            data.heure
   };
 }
 
-// ——— Express router ———
+// — Express router —
 const router = express.Router();
 router.post('/', async (req, res) => {
   try {
@@ -188,7 +181,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error:'recordingId, conversationId et memberId requis' });
     }
 
-    // 1) attendre + télécharger + sauvegarder audio
+    // 1) Attendre + télécharger + sauvegarder audio
     await waitReady(recordingId);
     const dlUrl = await getDownloadLink(recordingId);
     const audioBuf = await downloadBuffer(dlUrl);
@@ -199,7 +192,7 @@ router.post('/', async (req, res) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    // 2) transcription → DOCX
+    // 2) Transcription → DOCX
     const transcription = await transcribe(`gs://${bucket.name}/${audioPath}`);
     const txtPath = `transcriptions/${conversationId}_${Date.now()}.docx`;
     const docTrans = new Document({
@@ -217,10 +210,10 @@ router.post('/', async (req, res) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    // 3) résumé structuré
+    // 3) Génération du résumé structuré
     const data = await summarizeText(transcription);
 
-    // 4) date & heure 100 % serveurs
+    // 4) Date & heure fiables à 100%
     const now = new Date();
     const day   = String(now.getDate()).padStart(2,'0');
     const month = String(now.getMonth()+1).padStart(2,'0');
@@ -228,11 +221,10 @@ router.post('/', async (req, res) => {
     data.date  = `${day}_${month}_${year}`;
     data.heure = now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 
-    // 5) rendu du template
+    // 5) Rendu du template (avec nettoyage des balises gênantes)
     if (!templateBuffer) throw new Error('Template non chargé');
     const zip = new PizZip(templateBuffer);
     let xml = zip.file('word/document.xml').asText();
-    // nettoyage des balises gênantes
     xml = xml
       .replace(/<w:proofErr\b[^>]*>[\s\S]*?<\/w:proofErr>/g,'')
       .replace(/<w:proofErr\b[^>]*\/>/g,'')
@@ -246,8 +238,8 @@ router.post('/', async (req, res) => {
       delimiters: { start:'[%', end:'%]' }
     });
 
-    // listes formatées
-    const points = (data.pointsCles||[]).map(p=>'• '+p).join('\n');
+    // Listes formatées en JS
+    const points = (data.pointsCles||[]).map(p => '• '+p).join('\n');
     const etapes = (data.prochainesEtapes||[]).map((s,i)=>(i+1)+'. '+s).join('\n');
 
     tpl.render({
@@ -264,7 +256,7 @@ router.post('/', async (req, res) => {
 
     const bufOut = tpl.getZip().generate({ type:'nodebuffer' });
 
-    // 6) sauvegarde dans dossier member-specific
+    // 6) Sauvegarde dans dossier spécifique au member
     const reportName = `Rapport_IA_du_${data.date}.docx`;
     const reportPath = `Rapport_Daily_AI/Rapport_de_${memberId}/${reportName}`;
     await saveBuffer(bufOut, reportPath,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
