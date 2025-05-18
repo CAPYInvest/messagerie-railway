@@ -91,10 +91,15 @@ async function downloadBuffer(url) {
   const resp = await axios.get(url, { responseType: 'arraybuffer' });
   return Buffer.from(resp.data);
 }
-async function saveBuffer(buf, path, contentType) {
+async function saveBuffer(buf, path, contentType, downloadName=null) {
   console.log(`[callReport] Saving ${path}`);
   const file = bucket.file(path);
-  await file.save(buf, { metadata:{ contentType } });
+  // Préparer les métadonnées, en y injectant le contentDisposition si on a un downloadName
+  const metadata = { contentType };
+  if (downloadName) {
+    metadata.contentDisposition = `attachment; filename="${downloadName}"`;
+  }
+  await file.save(buf, { metadata });
   return `gs://${bucket.name}/${path}`;
 }
 async function transcribe(gsUri) {
@@ -259,14 +264,6 @@ zip.file('word/document.xml', xml);
     });
 
 
-    // 8) Si vous voulez absolument justifier la conclusion via raw XML
-const conclusionXml = `
-<w:p>
-  <w:pPr><w:jc w:val="both"/></w:pPr>
-  <w:r><w:t xml:space="preserve">${data.conclusion}</w:t></w:r>
-</w:p>
-`.trim();
-
     // — Préparation des listes —
     const points = (data.pointsCles||[]).map(p=>'• '+p).join('\n');
     const etapes = (data.prochainesEtapes||[]).map((s,i)=>(i+1)+'. '+s).join('\n');
@@ -281,14 +278,23 @@ tpl.render({
   POINTS_CLES:       pointsList,
   PROCHAINES_ETAPES: etapesList,
   ACTIONS_A_REALISER:actionsList,
-  CONCLUSION:        { _raw: conclusionXml } // insertion de XML justifié
+  CONCLUSION:        data.conclusion // insertion de XML justifié
 });
     const bufOut = tpl.getZip().generate({ type:'nodebuffer' });
 
     // 6) Sauvegarde member‐specific
     const reportName = `Rapport_IA_du_${data.date}_ID_${uniqueId}.docx`;
     const reportPath = `Rapport_Daily_AI/Rapport_de_${memberId}/${reportName}`;
-    await saveBuffer(bufOut, reportPath,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    // on isole le nom de fichier
+const fileName = reportPath.split('/').pop();
+// upload avec disposition pour le download
+await saveBuffer(
+  bufOut,
+  reportPath,
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  fileName
+);
+
     await db.collection('Rapport_Daily_AI').add({
       conversationId, fileName:reportPath, memberId,
       ...data, consent:true,
