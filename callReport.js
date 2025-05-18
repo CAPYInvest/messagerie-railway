@@ -209,15 +209,30 @@ router.post('/', async (req, res) => {
     // 3) Résumé structuré
     const data = await summarizeText(transcription);
 
-    // 4) Date & heure fiables
-    const now = new Date();
-    const day   = String(now.getDate()).padStart(2,'0');
-    const month = String(now.getMonth()+1).padStart(2,'0');
-    const year  = now.getFullYear();
-    data.date  = `${day}_${month}_${year}`;
-    data.heure = now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    // 4) Date & heure fiables à 100% (heure de Paris)
+const now = new Date();
+const day   = String(now.getDate()).padStart(2,'0');
+const month = String(now.getMonth()+1).padStart(2,'0');
+const year  = now.getFullYear();
+data.date  = `${day}_${month}_${year}`;
+data.heure = now.toLocaleTimeString('fr-FR', {
+  hour:   '2-digit',
+  minute: '2-digit',
+  timeZone: 'Europe/Paris'
+});
 
-    // 5) Génération du rapport DOCX via votre template
+// 5) Préparation des listes avec tabulation avant/après puce/numéro
+const participantsList = (data.participants||[])
+  .map(p => `\t•\t${p}`)
+  .join('\n');
+const pointsList = (data.pointsCles||[])
+  .map(p => `\t•\t${p}`)
+  .join('\n');
+const etapesList = (data.prochainesEtapes||[])
+  .map((s,i) => `\t${i+1}.\t${s}`)
+  .join('\n');
+
+    // 6) Génération du rapport DOCX via votre template
     if (!templateBuffer) throw new Error('Template non chargé');
 
     // — Nettoyage automatique des numérotations dans XML —
@@ -242,18 +257,18 @@ router.post('/', async (req, res) => {
     const points = (data.pointsCles||[]).map(p=>'• '+p).join('\n');
     const etapes = (data.prochainesEtapes||[]).map((s,i)=>(i+1)+'. '+s).join('\n');
 
-    // — Remplissage des placeholders —
-    tpl.render({
-      TITRE:             data.titre,
-      DATE:              data.date.replace(/_/g,'/'),
-      HEURE:             data.heure,
-      OBJET:             data.objet,
-      PARTICIPANTS:      (data.participants||[]).join('\n'),
-      POINTS_CLES:       points,
-      PROCHAINES_ETAPES: etapes,
-      ACTIONS_A_REALISER:(data.actionsARealiser||[]).join('\n'),
-      CONCLUSION:        data.conclusion
-    });
+  // 7) Remplissage des placeholders
+tpl.render({
+  TITRE:             data.titre,
+  DATE:              data.date.replace(/_/g,'/'),
+  HEURE:             data.heure,
+  OBJET:             data.objet,              // 👉 la couleur du texte "Objet" se gère dans votre template Word (format de la zone [%OBJET%])
+  PARTICIPANTS:      participantsList,
+  POINTS_CLES:       pointsList,
+  PROCHAINES_ETAPES: etapesList,
+  ACTIONS_A_REALISER:(data.actionsARealiser||[]).map(a=>`\t•\t${a}`).join('\n'),
+  CONCLUSION:        data.conclusion
+});
 
     const bufOut = tpl.getZip().generate({ type:'nodebuffer' });
 
