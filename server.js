@@ -55,6 +55,17 @@ app.use(express.json());
 app.use('/api', authRoutes);
 
 
+// ------------------------------------------------------------------------------------
+// -----------------------SAUVEGARDE des création d'annonce----------------------------
+// ------------------------------------------------------------------------------------
+
+app.use(express.json({ limit: "10mb" })); // Important pour les gros formulaires
+app.use(express.urlencoded({ extended: true }));
+
+// Importe le router Annonce
+const annonceRouter = require("./Annonce");
+app.use("/api/annonce", annonceRouter);
+
 
 
 
