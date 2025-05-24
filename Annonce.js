@@ -19,23 +19,27 @@ router.post("/save-step", async (req, res) => {
   try {
     let { annonceId, stepIndex, data, memberId } = req.body;
     if (!annonceId) annonceId = uuidv4();
-
     const annonceRef = db.collection("annonces").doc(annonceId);
 
-    // On stocke la donnée de l'étape dans un objet "steps"
-    await annonceRef.set({
+    let docData = {
       annonceId: annonceId,
       memberId: memberId,
       [`step${stepIndex}`]: data,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+    };
+
+    // Ajoute nomAnnonce à la racine si on est à l'étape 6
+    if (parseInt(stepIndex) === 5 && data.nomAnnonce) {
+      docData.nomAnnonce = data.nomAnnonce;
+    }
+    await annonceRef.set(docData, { merge: true });
 
     res.json({ success: true, annonceId });
   } catch (error) {
-    console.error("[Annonce] Erreur save-step :", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 
 
