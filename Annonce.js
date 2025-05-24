@@ -17,6 +17,10 @@ const bucket = admin.storage().bucket();
 //-----------------------------------------------------------------------------
 router.post("/save-step", async (req, res) => {
   try {
+
+    // Log tout le body reçu pour debug
+    console.log(`[BACK] Body reçu étape ${req.body.stepIndex}:`, req.body);
+
     let { annonceId, stepIndex, data, memberId } = req.body;
     if (!annonceId) annonceId = uuidv4();
     const annonceRef = db.collection("annonces").doc(annonceId);
@@ -32,6 +36,10 @@ router.post("/save-step", async (req, res) => {
     if (parseInt(stepIndex) === 5 && data.nomAnnonce) {
       docData.nomAnnonce = data.nomAnnonce;
     }
+
+    // Log complet des données enregistrées
+    console.log(`[BACK] Données enregistrées en Firestore (annonceId ${annonceId}) :`, docData);
+    
     await annonceRef.set(docData, { merge: true });
 
     res.json({ success: true, annonceId });
