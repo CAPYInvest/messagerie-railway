@@ -17,7 +17,7 @@ const bucket = admin.storage().bucket();
 //-----------------------------------------------------------------------------
 router.post("/save-step", async (req, res) => {
   try {
-    let { annonceId, stepIndex, data } = req.body;
+    let { annonceId, stepIndex, data, memberId } = req.body;
     if (!annonceId) annonceId = uuidv4();
 
     const annonceRef = db.collection("annonces").doc(annonceId);
@@ -25,6 +25,7 @@ router.post("/save-step", async (req, res) => {
     // On stocke la donnée de l'étape dans un objet "steps"
     await annonceRef.set({
       annonceId: annonceId,
+      memberId: memberId,
       [`step${stepIndex}`]: data,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
