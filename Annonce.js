@@ -122,19 +122,33 @@ router.post("/upload-photo", upload.single("photo"), async (req, res) => {
 
 
 //-----------------------------------------------------------------
-// ----  route pour récupérer toutes les annonces publiées --------
+//-----  route pour récupérer toutes les annonces publiées --------
+//--------Liste paginée/filtrée des annonces publiées--------------
 //-----------------------------------------------------------------
 
 
-router.get("/list-publiques", async (req, res) => {
+router.get("/list", async (req, res) => {
   try {
+    // Extraction des filtres & pagination (à adapter plus tard !)
+    // const { page = 1, limit = 20, tri, ... } = req.query;
+
+    // 1. On récupère TOUTES les annonces “publiées”
     const snapshot = await db.collection("annonces")
-      .where("statutPublication", "==", "Oui")
+      .where("step5.statutPublication", "==", "Oui")
+      .orderBy("updatedAt", "desc") // plus récent en premier
+      //.limit(parseInt(limit)) // à décommenter pour paginer
       .get();
-    const annonces = snapshot.docs.map(doc => doc.data());
+
+    // 2. On mappe les résultats
+    const annonces = [];
+    snapshot.forEach(doc => {
+      annonces.push(doc.data());
+    });
+
     res.json({ success: true, annonces });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (error) {
+    console.error("[Annonce] Erreur /list :", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
