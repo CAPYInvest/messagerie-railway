@@ -17,8 +17,6 @@ const bucket = admin.storage().bucket();
 //-----------------------------------------------------------------------------
 router.post("/save-step", async (req, res) => {
   try {
-
-    // Log tout le body reçu pour debug
     console.log(`[BACK] Body reçu étape ${req.body.stepIndex}:`, req.body);
 
     let { annonceId, stepIndex, data, memberId } = req.body;
@@ -32,14 +30,16 @@ router.post("/save-step", async (req, res) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
 
-    // Ajoute nomAnnonce à la racine si on est à l'étape 6
-    if (parseInt(stepIndex) === 5 && data.nomAnnonce) {
-      docData.nomAnnonce = data.nomAnnonce;
+    // Gestion du statut de publication :
+    if (parseInt(stepIndex) === 5) { // Étape publication
+      docData.nomAnnonce = data.nomAnnonce || ""; // à la racine pour le listing
+      docData.statutPublication = "Oui";
+    } else {
+      docData.statutPublication = "Non";
     }
 
-    // Log complet des données enregistrées
     console.log(`[BACK] Données enregistrées en Firestore (annonceId ${annonceId}) :`, docData);
-    
+
     await annonceRef.set(docData, { merge: true });
 
     res.json({ success: true, annonceId });
@@ -47,6 +47,25 @@ router.post("/save-step", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+
+//---------------------------------------------------------------
+// ---- Route : Récupération d'une annonce pour pré-remplissage -
+//---------------------------------------------------------------
+router.get("/get/:annonceId", async (req, res) => {
+  try {
+    const annonceId = req.params.annonceId;
+    if (!annonceId) return res.status(400).json({ success: false, error: "annonceId manquant" });
+
+    const doc = await db.collection("annonces").doc(annonceId).get();
+    if (!doc.exists) return res.status(404).json({ success: false, error: "Annonce introuvable" });
+
+    res.json({ success: true, annonce: doc.data() });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 
 
@@ -97,5 +116,25 @@ router.post("/upload-photo", upload.single("photo"), async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+
+
+//-----------------------------------------------------------------
+// ----  route pour récupérer toutes les annonces publiées --------
+//-----------------------------------------------------------------
+
+
+router.get("/list-publiques", async (req, res) => {
+  try {
+    const snapshot = await db.collection("annonces")
+      .where("statutPublication", "==", "Oui")
+      .get();
+    const annonces = snapshot.docs.map(doc => doc.data());
+    res.json({ success: true, annonces });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 module.exports = router;
