@@ -54,13 +54,17 @@ router.get("/get/:memberId", async (req, res) => {
     if (!memberId) return res.status(400).json({ success: false, error: "memberId manquant" });
 
     const doc = await db.collection("annonces").doc(memberId).get();
-    if (!doc.exists) return res.status(404).json({ success: false, error: "Annonce introuvable" });
+    if (!doc.exists) {
+      // Au lieu d'une erreur, on retourne une réponse normale mais vide
+      return res.json({ success: true, annonce: null });
+    }
 
     res.json({ success: true, annonce: doc.data() });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 
 
