@@ -17,47 +17,43 @@ const bucket = admin.storage().bucket();
 //-----------------------------------------------------------------------------
 router.post("/save-step", async (req, res) => {
   try {
-    console.log(`[BACK] Body reçu étape ${req.body.stepIndex}:`, req.body);
+    let { stepIndex, data, memberId } = req.body;
+    if (!memberId) return res.status(400).json({ success: false, error: "memberId requis" });
 
-    let { annonceId, stepIndex, data, memberId } = req.body;
-    if (!annonceId) annonceId = uuidv4();
-    const annonceRef = db.collection("annonces").doc(annonceId);
+    const annonceRef = db.collection("annonces").doc(memberId);
 
     let docData = {
-      annonceId: annonceId,
       memberId: memberId,
       [`step${stepIndex}`]: data,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
 
-    // Gestion du statut de publication :
-    if (parseInt(stepIndex) === 5) { // Étape publication
-      docData.nomAnnonce = data.nomAnnonce || ""; // à la racine pour le listing
+    if (parseInt(stepIndex) === 5) {
+      docData.nomAnnonce = data.nomAnnonce || "";
       docData.statutPublication = "Oui";
     } else {
       docData.statutPublication = "Non";
     }
 
-    console.log(`[BACK] Données enregistrées en Firestore (annonceId ${annonceId}) :`, docData);
-
     await annonceRef.set(docData, { merge: true });
 
-    res.json({ success: true, annonceId });
+    res.json({ success: true, annonceId: memberId });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 
+
 //---------------------------------------------------------------
 // ---- Route : Récupération d'une annonce pour pré-remplissage -
 //---------------------------------------------------------------
-router.get("/get/:annonceId", async (req, res) => {
+router.get("/get/:memberId", async (req, res) => {
   try {
-    const annonceId = req.params.annonceId;
-    if (!annonceId) return res.status(400).json({ success: false, error: "annonceId manquant" });
+    const memberId = req.params.memberId;
+    if (!memberId) return res.status(400).json({ success: false, error: "memberId manquant" });
 
-    const doc = await db.collection("annonces").doc(annonceId).get();
+    const doc = await db.collection("annonces").doc(memberId).get();
     if (!doc.exists) return res.status(404).json({ success: false, error: "Annonce introuvable" });
 
     res.json({ success: true, annonce: doc.data() });
@@ -70,20 +66,22 @@ router.get("/get/:annonceId", async (req, res) => {
 
 
 
+
 //---------------------------------------------------
 // ---- Route : Upload de la photo de profil --------
 //---------------------------------------------------
 router.post("/upload-photo", upload.single("photo"), async (req, res) => {
-  try {
-    const { annonceId } = req.body;
+   try {
+    const { memberId } = req.body;
     const file = req.file;
-    if (!annonceId) return res.status(400).json({ success: false, error: "annonceId requis" });
+    if (!memberId) return res.status(400).json({ success: false, error: "memberId requis" });
     if (!file) return res.status(400).json({ success: false, error: "Fichier manquant" });
 
-    // Détermine l'extension
+    // Utilise memberId comme clé de doc et dossier storage
     const ext = file.originalname.split('.').pop();
-    const fileName = `annonces/${annonceId}/photo_profil.${ext}`;
+    const fileName = `annonces/${memberId}/photo_profil.${ext}`;
     const blob = bucket.file(fileName);
+
 
     // Upload dans Firebase Storage
     const blobStream = blob.createWriteStream({
@@ -100,7 +98,7 @@ router.post("/upload-photo", upload.single("photo"), async (req, res) => {
       });
 
       // Mets à jour Firestore avec l'URL de la photo
-      await db.collection("annonces").doc(annonceId).set({
+      await db.collection("annonces").doc(memberId).set({
         photoURL: url
       }, { merge: true });
 
