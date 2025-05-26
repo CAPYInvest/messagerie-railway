@@ -153,4 +153,49 @@ router.get("/list", async (req, res) => {
 });
 
 
+
+// ---------------------------------------------------------------------------------
+// Endpoint pour récupérer les annonces dans une bounding box (visible sur la carte)
+// ---------------------------------------------------------------------------------
+router.get("/list-in-bounds", async (req, res) => {
+  try {
+    const { neLat, neLng, swLat, swLng } = req.query;
+    if (
+      !neLat || !neLng || !swLat || !swLng
+      || isNaN(parseFloat(neLat)) || isNaN(parseFloat(neLng))
+      || isNaN(parseFloat(swLat)) || isNaN(parseFloat(swLng))
+    ) {
+      return res.status(400).json({ success: false, error: "Coordonnées invalides" });
+    }
+    // Firestore requête
+    const annoncesRef = db.collection("annonces")
+      .where("step5.statutPublication", "==", "Oui"); // On affiche que les publiées
+
+    const snapshot = await annoncesRef.get();
+    const annonces = [];
+    snapshot.forEach(doc => {
+      const annonce = doc.data();
+      if (
+        annonce.step3
+        && typeof annonce.step3.latitude === "number"
+        && typeof annonce.step3.longitude === "number"
+      ) {
+        const { latitude, longitude } = annonce.step3;
+        // Vérifie que la coordonnée est bien dans la zone affichée par la carte
+        if (
+          latitude <= parseFloat(neLat) && latitude >= parseFloat(swLat) &&
+          longitude >= parseFloat(swLng) && longitude <= parseFloat(neLng)
+        ) {
+          annonces.push({ ...annonce, id: doc.id });
+        }
+      }
+    });
+    res.json({ success: true, annonces });
+  } catch (err) {
+    console.error("[Annonce] Erreur /list-in-bounds :", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
 module.exports = router;
