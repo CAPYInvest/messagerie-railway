@@ -291,11 +291,28 @@ router.post('/search', async (req, res) => {
     }
 
     // Filtre RDV types
-    if (rdvTypes && rdvTypes.length > 0) {
-      annonces = annonces.filter(annonce =>
-        rdvTypes.includes(annonce.step3?.typeRdv)
+    if (req.body.typeRDV) {
+      if (req.body.typeRDV === "Presentiel") {
+        // On garde ceux qui sont "Présentiel" ou "Présentiel ou visioconférence"
+        annonces = annonces.filter(a =>
+        a.step3 &&
+        (
+          a.step3.typeRdv === "Presentiel" ||
+          a.step3.typeRdv === "Presentiel ou visioconference"
+        )
+      );
+    } else if (req.body.typeRDV === "Visioconference") {
+      // On garde ceux qui sont "Visioconférence" ou "Présentiel ou visioconférence"
+      annonces = annonces.filter(a =>
+        a.step3 &&
+        (
+          a.step3.typeRdv === "Visioconference" ||
+          a.step3.typeRdv === "Presentiel ou visioconference"
+        ) 
       );
     }
+    // Si typeRDV est null, on ne filtre pas
+  }
 
     // Filtre localisation/rayon
     if (localisation && localisation.lat && localisation.lng && localisation.rayon) {
