@@ -263,6 +263,9 @@ router.post('/search', async (req, res) => {
         .where('step3.longitude', '<=', mapBounds.neLng);
     }
 
+
+    
+
     // On récupère TOUT
     const snapshot = await ref.get();
     let annonces = [];
@@ -271,6 +274,9 @@ router.post('/search', async (req, res) => {
       data.id = doc.id;
       annonces.push(data);
     });
+
+
+
 
     // Recherche texte (multi-champ)
     if (texte && texte.trim()) {
@@ -289,6 +295,9 @@ router.post('/search', async (req, res) => {
         );
       });
     }
+
+
+
 
     // Filtre RDV types
     if (req.body.typeRDV) {
@@ -313,6 +322,9 @@ router.post('/search', async (req, res) => {
     }
     // Si typeRDV est null, on ne filtre pas
   }
+
+
+
 
     // Filtre localisation/rayon
     if (localisation && localisation.lat && localisation.lng && localisation.rayon) {
