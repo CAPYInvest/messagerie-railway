@@ -298,7 +298,7 @@ router.post('/search', async (req, res) => {
         a.step3 &&
         (
           a.step3.typeRdv === "Presentiel" ||
-          a.step3.typeRdv === "Presentiel-ou-visioconference"
+          a.step3.typeRdv === "Presentiel-ou-Visioconference"
         )
       );
     } else if (req.body.typeRDV === "Visioconference") {
@@ -307,7 +307,7 @@ router.post('/search', async (req, res) => {
         a.step3 &&
         (
           a.step3.typeRdv === "Visioconference" ||
-          a.step3.typeRdv === "Presentiel-ou-visioconference"
+          a.step3.typeRdv === "Presentiel-ou-Visioconference"
         ) 
       );
     }
