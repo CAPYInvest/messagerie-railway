@@ -198,4 +198,131 @@ router.get("/list-in-bounds", async (req, res) => {
 });
 
 
+// ---------------------------------------------------------------------------------
+// --------------Endpoint pour la recherche par localisation------------------------
+// ---------------------------------------------------------------------------------
+
+// Util pour calculer la distance
+function haversine(lat1, lng1, lat2, lng2) {
+  function toRad(x) { return x * Math.PI / 180; }
+  const R = 6371; // rayon de la Terre en km
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// --- Recherche complète ---
+router.post('/search', async (req, res) => {
+  try {
+    const {
+      texte,
+      fonction,
+      tri,
+      domaines,
+      esg,
+      rdvTypes,
+      localisation, // {lat, lng, rayon}
+      mapBounds // {neLat, neLng, swLat, swLng} (optionnel)
+    } = req.body;
+
+    let ref = db.collection('annonces');
+
+    // Statut publication seulement
+    ref = ref.where('step5.statutPublication', '==', 'Oui');
+
+    // Filtre Corps de métier/fonction
+    if (fonction && fonction !== "empty") {
+      ref = ref.where('step1.fonction', '==', fonction);
+    }
+
+    // Filtre ESG
+    if (esg === "Oui" || esg === "Non") {
+      ref = ref.where('step1.esg', '==', esg);
+    }
+
+    // Type RDV
+    if (rdvTypes && rdvTypes.length > 0) {
+      // On ne peut pas faire un array-contains-any sur deux arrays, donc filtrage JS après
+    }
+
+    // Domaines d'expertise
+    if (domaines && domaines.length > 0) {
+      ref = ref.where('step1.domainesExpertise', 'array-contains-any', domaines);
+    }
+
+    // Si mapBounds, filtre grossier Firestore AVANT filtrage JS (améliore perf)
+    if (mapBounds) {
+      ref = ref
+        .where('step3.latitude', '>=', mapBounds.swLat)
+        .where('step3.latitude', '<=', mapBounds.neLat)
+        .where('step3.longitude', '>=', mapBounds.swLng)
+        .where('step3.longitude', '<=', mapBounds.neLng);
+    }
+
+    // On récupère TOUT
+    const snapshot = await ref.get();
+    let annonces = [];
+    snapshot.forEach(doc => {
+      let data = doc.data();
+      data.id = doc.id;
+      annonces.push(data);
+    });
+
+    // Recherche texte (multi-champ)
+    if (texte && texte.trim()) {
+      const texteLC = texte.trim().toLowerCase();
+      annonces = annonces.filter(annonce => {
+        return (
+          (annonce.step0?.nom || '').toLowerCase().includes(texteLC) ||
+          (annonce.step0?.prenom || '').toLowerCase().includes(texteLC) ||
+          (annonce.step3?.ville || '').toLowerCase().includes(texteLC) ||
+          (annonce.step1?.fonction || '').toLowerCase().includes(texteLC) ||
+          (annonce.step3?.typeRdv || '').toLowerCase().includes(texteLC) ||
+          (annonce.step2?.accroche || '').toLowerCase().includes(texteLC) ||
+          (annonce.step4?.tarifHoraire || '').toString().includes(texteLC) ||
+          (annonce.step1?.domainesExpertise || []).some(d => d.toLowerCase().includes(texteLC)) ||
+          (annonce.step4?.propositionService || '').toLowerCase().includes(texteLC)
+        );
+      });
+    }
+
+    // Filtre RDV types
+    if (rdvTypes && rdvTypes.length > 0) {
+      annonces = annonces.filter(annonce =>
+        rdvTypes.includes(annonce.step3?.typeRdv)
+      );
+    }
+
+    // Filtre localisation/rayon
+    if (localisation && localisation.lat && localisation.lng && localisation.rayon) {
+      annonces = annonces.filter(annonce => {
+        const lat = annonce.step3?.latitude;
+        const lng = annonce.step3?.longitude;
+        if (typeof lat !== 'number' || typeof lng !== 'number') return false;
+        return haversine(localisation.lat, localisation.lng, lat, lng) <= localisation.rayon;
+      });
+    }
+
+    // Tri
+    if (tri === "Tarif-croissant") {
+      annonces = annonces.sort((a, b) =>
+        (parseFloat(a.step4?.tarifHoraire) || 0) - (parseFloat(b.step4?.tarifHoraire) || 0)
+      );
+    } else if (tri === "Tarif-decroissant") {
+      annonces = annonces.sort((a, b) =>
+        (parseFloat(b.step4?.tarifHoraire) || 0) - (parseFloat(a.step4?.tarifHoraire) || 0)
+      );
+    } // sinon pas de tri, ou trie par date si besoin
+
+    res.json({ success: true, annonces });
+  } catch (err) {
+    console.error("[Annonce][search] Erreur : ", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
