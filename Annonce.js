@@ -199,23 +199,23 @@ router.get("/list-in-bounds", async (req, res) => {
 
 
 // ---------------------------------------------------------------------------------
-// --------------Endpoint pour la recherche par localisation------------------------
+// --------------Endpoint pour la recherche par localisation & filtres--------------
 // ---------------------------------------------------------------------------------
 
-// Util pour calculer la distance
+// Fonction Haversine pour la distance en km
 function haversine(lat1, lng1, lat2, lng2) {
   function toRad(x) { return x * Math.PI / 180; }
-  const R = 6371; // rayon de la Terre en km
+  const R = 6371;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
   const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// --- Recherche complète ---
+// Recherche multi-critères
 router.post('/search', async (req, res) => {
   try {
     const {
@@ -224,37 +224,25 @@ router.post('/search', async (req, res) => {
       tri,
       domaines,
       esg,
-      rdvTypes,
+      typeRDV,
       localisation, // {lat, lng, rayon}
-      mapBounds // {neLat, neLng, swLat, swLng} (optionnel)
+      mapBounds // {neLat, neLng, swLat, swLng}
     } = req.body;
 
     let ref = db.collection('annonces');
-
-    // Statut publication seulement
     ref = ref.where('step5.statutPublication', '==', 'Oui');
 
-    // Filtre Corps de métier/fonction
-    if (fonction && fonction !== "empty") {
+    if (fonction && fonction !== "empty")
       ref = ref.where('step1.fonction', '==', fonction);
-    }
 
-    // Filtre ESG
-    if (esg === "Oui" || esg === "Non") {
+    if (esg === "Oui" || esg === "Non")
       ref = ref.where('step1.esg', '==', esg);
-    }
-
-    // Type RDV
-    if (rdvTypes && rdvTypes.length > 0) {
-      // On ne peut pas faire un array-contains-any sur deux arrays, donc filtrage JS après
-    }
 
     // Domaines d'expertise
-    if (domaines && domaines.length > 0) {
+    if (domaines && domaines.length > 0)
       ref = ref.where('step1.domainesExpertise', 'array-contains-any', domaines);
-    }
 
-    // Si mapBounds, filtre grossier Firestore AVANT filtrage JS (améliore perf)
+    // Map bounds pour limiter les requêtes Firestore
     if (mapBounds) {
       ref = ref
         .where('step3.latitude', '>=', mapBounds.swLat)
@@ -263,10 +251,7 @@ router.post('/search', async (req, res) => {
         .where('step3.longitude', '<=', mapBounds.neLng);
     }
 
-
-    
-
-    // On récupère TOUT
+    // Récupère les annonces
     const snapshot = await ref.get();
     let annonces = [];
     snapshot.forEach(doc => {
@@ -275,58 +260,49 @@ router.post('/search', async (req, res) => {
       annonces.push(data);
     });
 
-
-
-
-    // Recherche texte (multi-champ)
+    // Texte recherche (multi-champ)
     if (texte && texte.trim()) {
       const texteLC = texte.trim().toLowerCase();
-      annonces = annonces.filter(annonce => {
-        return (
-          (annonce.step0?.nom || '').toLowerCase().includes(texteLC) ||
-          (annonce.step0?.prenom || '').toLowerCase().includes(texteLC) ||
-          (annonce.step3?.ville || '').toLowerCase().includes(texteLC) ||
-          (annonce.step1?.fonction || '').toLowerCase().includes(texteLC) ||
-          (annonce.step3?.typeRdv || '').toLowerCase().includes(texteLC) ||
-          (annonce.step2?.accroche || '').toLowerCase().includes(texteLC) ||
-          (annonce.step4?.tarifHoraire || '').toString().includes(texteLC) ||
-          (annonce.step1?.domainesExpertise || []).some(d => d.toLowerCase().includes(texteLC)) ||
-          (annonce.step4?.propositionService || '').toLowerCase().includes(texteLC)
-        );
-      });
+      annonces = annonces.filter(annonce =>
+        (annonce.step0?.nom || '').toLowerCase().includes(texteLC) ||
+        (annonce.step0?.prenom || '').toLowerCase().includes(texteLC) ||
+        (annonce.step3?.ville || '').toLowerCase().includes(texteLC) ||
+        (annonce.step1?.fonction || '').toLowerCase().includes(texteLC) ||
+        (annonce.step3?.typeRdv || '').toLowerCase().includes(texteLC) ||
+        (annonce.step2?.accroche || '').toLowerCase().includes(texteLC) ||
+        (annonce.step4?.tarifHoraire || '').toString().includes(texteLC) ||
+        (annonce.step1?.domainesExpertise || []).some(d => d.toLowerCase().includes(texteLC)) ||
+        (annonce.step4?.propositionService || '').toLowerCase().includes(texteLC)
+      );
     }
-
-
-
 
     // Filtre RDV types
-    if (req.body.typeRDV) {
-      if (req.body.typeRDV === "Presentiel") {
-        // On garde ceux qui sont "Présentiel" ou "Présentiel ou visioconférence"
+    if (typeRDV) {
+      if (typeRDV === "Presentiel") {
         annonces = annonces.filter(a =>
-        a.step3 &&
-        (
-          a.step3.typeRdv === "Presentiel" ||
-          a.step3.typeRdv === "Presentiel-ou-Visioconference"
-        )
-      );
-    } else if (req.body.typeRDV === "Visioconference") {
-      // On garde ceux qui sont "Visioconférence" ou "Présentiel ou visioconférence"
-      annonces = annonces.filter(a =>
-        a.step3 &&
-        (
-          a.step3.typeRdv === "Visioconference" ||
-          a.step3.typeRdv === "Presentiel-ou-Visioconference"
-        ) 
-      );
+          a.step3 &&
+          (
+            a.step3.typeRdv === "Presentiel" ||
+            a.step3.typeRdv === "Presentiel-ou-Visioconference" ||
+            a.step3.typeRdv === "Présentiel" || // gestion majuscules/accents éventuels
+            a.step3.typeRdv === "Présentiel ou visioconférence"
+          )
+        );
+      } else if (typeRDV === "Visioconference") {
+        annonces = annonces.filter(a =>
+          a.step3 &&
+          (
+            a.step3.typeRdv === "Visioconference" ||
+            a.step3.typeRdv === "Presentiel-ou-Visioconference" ||
+            a.step3.typeRdv === "Visioconférence" ||
+            a.step3.typeRdv === "Présentiel ou visioconférence"
+          )
+        );
+      }
+      // Si null, on ne filtre pas.
     }
-    // Si typeRDV est null, on ne filtre pas
-  }
 
-
-
-
-    // Filtre localisation/rayon
+    // Filtre localisation/rayon (vrai cercle)
     if (localisation && localisation.lat && localisation.lng && localisation.rayon) {
       annonces = annonces.filter(annonce => {
         const lat = annonce.step3?.latitude;
@@ -345,7 +321,7 @@ router.post('/search', async (req, res) => {
       annonces = annonces.sort((a, b) =>
         (parseFloat(b.step4?.tarifHoraire) || 0) - (parseFloat(a.step4?.tarifHoraire) || 0)
       );
-    } // sinon pas de tri, ou trie par date si besoin
+    }
 
     res.json({ success: true, annonces });
   } catch (err) {
@@ -353,5 +329,6 @@ router.post('/search', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 module.exports = router;
