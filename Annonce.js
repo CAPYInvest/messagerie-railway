@@ -202,6 +202,46 @@ router.get("/list-in-bounds", async (req, res) => {
 // --------------Endpoint pour la recherche par localisation & filtres--------------
 // ---------------------------------------------------------------------------------
 
+// Fonction de “normalisation” Supprimer accents, minusculiser, enlever ponctuation pour matcher plus large
+function normalize(str) {
+  return (str || "")
+    .toLowerCase()
+    .normalize("NFD")                // Supprime accents
+    .replace(/[\u0300-\u036f]/g, "") // Supprime diacritiques
+    .replace(/[-_]/g, " ")           // Tirets/underscores => espace
+    .replace(/[^\w\s]/g, "")         // Supprime ponctuation
+    .replace(/\s+/g, " ")            // Espace unique
+    .trim();
+}
+
+
+//Distance de Levenshtein (pour fuzzy matching)
+function levenshtein(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  let matrix = [];
+  let i;
+  for (i = 0; i <= b.length; i++) matrix[i] = [i];
+  let j;
+  for (j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (i = 1; i <= b.length; i++) {
+    for (j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+
+
 // Fonction Haversine pour la distance en km
 function haversine(lat1, lng1, lat2, lng2) {
   function toRad(x) { return x * Math.PI / 180; }
@@ -260,21 +300,36 @@ router.post('/search', async (req, res) => {
       annonces.push(data);
     });
 
-    // Texte recherche (multi-champ)
+    // Texte recherche (multi-champ) avec normalisation 
+
     if (texte && texte.trim()) {
-      const texteLC = texte.trim().toLowerCase();
-      annonces = annonces.filter(annonce =>
-        (annonce.step0?.nom || '').toLowerCase().includes(texteLC) ||
-        (annonce.step0?.prenom || '').toLowerCase().includes(texteLC) ||
-        (annonce.step3?.ville || '').toLowerCase().includes(texteLC) ||
-        (annonce.step1?.fonction || '').toLowerCase().includes(texteLC) ||
-        (annonce.step3?.typeRdv || '').toLowerCase().includes(texteLC) ||
-        (annonce.step2?.accroche || '').toLowerCase().includes(texteLC) ||
-        (annonce.step4?.tarifHoraire || '').toString().includes(texteLC) ||
-        (annonce.step1?.domainesExpertise || []).some(d => d.toLowerCase().includes(texteLC)) ||
-        (annonce.step4?.propositionService || '').toLowerCase().includes(texteLC)
-      );
-    }
+  const texteNorm = normalize(texte);
+  annonces = annonces.filter(annonce => {
+    // Liste de champs à tester (tu peux adapter)
+    const champs = [
+      annonce.step0?.nom,
+      annonce.step0?.prenom,
+      annonce.step3?.ville,
+      annonce.step1?.fonction,
+      annonce.step3?.typeRdv,
+      annonce.step2?.accroche,
+      (annonce.step4?.tarifHoraire || "").toString(),
+      ...(annonce.step1?.domainesExpertise || []),
+      annonce.step4?.propositionService
+    ];
+    // Pour chaque champ, on normalise puis compare
+    return champs.some(val => {
+      const valNorm = normalize(val);
+      if (!valNorm) return false;
+      // 1. Match exact (large, accents retirés)
+      if (valNorm.includes(texteNorm)) return true;
+      // 2. Fuzzy : distance <= 2 sur des mots courts
+      if (texteNorm.length >= 4 && valNorm.length >= 4 && levenshtein(valNorm, texteNorm) <= 2) return true;
+      return false;
+    });
+  });
+}
+
 
     // Filtre RDV types
     if (typeRDV) {
