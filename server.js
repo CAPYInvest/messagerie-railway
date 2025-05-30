@@ -19,10 +19,18 @@ const router = express.Router();
 const app = express();
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
+
+const helmet     = require('helmet');
+const rateLimit  = require('express-rate-limit');
+
+
+
 // Initialisation firebase admin pour pouvoir avoir acccès au Storage
 const admin = require('firebase-admin');
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+
+
 
 
 

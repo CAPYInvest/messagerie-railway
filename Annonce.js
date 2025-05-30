@@ -21,26 +21,6 @@ const bucket = admin.storage().bucket();
 
 
 /* ------------------------  Sécurité globale  ------------------------ */
-const helmet     = require('helmet');
-const rateLimit  = require('express-rate-limit');
-const cors       = require('cors');
-
-
-app.use(helmet({
-  contentSecurityPolicy: false           // si vous servez encore du inline-style
-}));
-app.use(cors({
-  origin: 'https://votre-domaine.fr',    // domaine front
-  methods: ['GET','POST']
-}));
-
-// 100 requêtes toutes les 15 min par IP
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false
-}));
 
 
 
