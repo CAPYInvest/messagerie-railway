@@ -4,12 +4,46 @@ const router = express.Router();
 const admin = require("firebase-admin");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
-
+const { body, validationResult, query } = require('express-validator');
 const upload = multer({ storage: multer.memoryStorage() });
+
+
+
+
 
 // ---- Firestore et Storage déjà initialisés dans ton app principale ----
 const db = admin.firestore();
 const bucket = admin.storage().bucket();
+
+
+
+
+
+
+/* ------------------------  Sécurité globale  ------------------------ */
+const helmet     = require('helmet');
+const rateLimit  = require('express-rate-limit');
+const cors       = require('cors');
+
+
+app.use(helmet({
+  contentSecurityPolicy: false           // si vous servez encore du inline-style
+}));
+app.use(cors({
+  origin: 'https://votre-domaine.fr',    // domaine front
+  methods: ['GET','POST']
+}));
+
+// 100 requêtes toutes les 15 min par IP
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false
+}));
+
+
+
 
 
 //-----------------------------------------------------------------------------
@@ -202,6 +236,31 @@ router.get("/list-in-bounds", async (req, res) => {
 // --------------Endpoint pour la recherche par localisation & filtres--------------
 // ---------------------------------------------------------------------------------
 
+const searchValidators = [
+  body('texte').optional().isString().isLength({ max: 200 }),
+  body('fonction').optional().isString().isLength({ max: 60 }),
+  body('tri').optional().isIn(['Tarif-croissant','Tarif-decroissant','']),
+  body('domaines').optional().isArray({ max: 14 }),
+  body('esg').optional().isIn(['Oui','Non','']),
+  body('typeRDV').optional().isIn(['Presentiel','Visioconference','']),
+  body('localisation').optional().custom(loc => {
+    if (!loc) return true;
+    const { lat, lng, rayon } = loc;
+    return typeof lat === 'number' && lat >= -90 && lat <= 90 &&
+           typeof lng === 'number' && lng >= -180 && lng <= 180 &&
+           typeof rayon === 'number' && rayon > 0 && rayon <= 100;
+  }),
+  body('mapBounds').optional().custom(b => {
+    if (!b) return true;
+    const { neLat, neLng, swLat, swLng } = b;
+    return [neLat, neLng, swLat, swLng].every(
+      v => typeof v === 'number' && !Number.isNaN(v)
+    );
+  })
+];
+
+
+
 // Fonction de “normalisation” Supprimer accents, minusculiser, enlever ponctuation pour matcher plus large
 function normalize(str) {
   return (str || "")
@@ -255,8 +314,24 @@ function haversine(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+
+
+
+
+
+
+
 // Recherche multi-critères
 router.post('/search', async (req, res) => {
+
+    /* ───── Résultat validation ───── */
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(422).json({ success:false, errors: errors.array() });
+  }
+
+
+
   try {
     const {
       texte,
