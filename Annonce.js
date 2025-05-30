@@ -5,7 +5,9 @@ const admin = require("firebase-admin");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 const { body, validationResult, query } = require('express-validator');
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({storage: multer.memoryStorage(), limits : { fileSize: 2 * 1024 * 1024 }  });    // 2 MiB
+const sharp      = require('sharp');
+const mime       = require('mime-types');
 
 
 
@@ -88,50 +90,56 @@ router.get("/get/:memberId", async (req, res) => {
 //---------------------------------------------------
 // ---- Route : Upload de la photo de profil --------
 //---------------------------------------------------
-router.post("/upload-photo", upload.single("photo"), async (req, res) => {
-   try {
-    const { memberId } = req.body;
-    const file = req.file;
-    if (!memberId) return res.status(400).json({ success: false, error: "memberId requis" });
-    if (!file) return res.status(400).json({ success: false, error: "Fichier manquant" });
+router.post('/upload-photo',
+  upload.single('photo'),
+  async (req, res) => {
+    try {
+      const { memberId } = req.body;
+      const file = req.file;
 
-    // Utilise memberId comme clé de doc et dossier storage
-    const ext = file.originalname.split('.').pop();
-    const fileName = `annonces/${memberId}/photo_profil.${ext}`;
-    const blob = bucket.file(fileName);
+      /* ---- 1) Vérifications de base ---- */
+      if (!memberId)   return res.status(400).json({ success:false, error:'memberId requis' });
+      if (!file)       return res.status(400).json({ success:false, error:'Fichier manquant' });
 
+      const mimeOk = ['image/jpeg','image/png','image/webp'].includes(file.mimetype);
+      if (!mimeOk)     return res.status(415).json({ success:false, error:'Format non autorisé' });
 
-    // Upload dans Firebase Storage
-    const blobStream = blob.createWriteStream({
-      metadata: { contentType: file.mimetype }
-    });
+      /* ---- 2) Traitement image (strip EXIF, resize) ---- */
+      const transformer = sharp(file.buffer)
+        .rotate()                       // respecte l’orientation EXIF puis…
+        .resize({ width: 800, height: 800, fit: 'inside' })
+        .toFormat('webp', { quality: 85 })      // convertit tout en WebP
 
-    blobStream.end(file.buffer);
+      const processedBuffer = await transformer.toBuffer();
+      const ext             = 'webp';
+      const fileName        = `annonces/${memberId}/photo_profil.${ext}`;
+      const blob            = bucket.file(fileName);
 
-    blobStream.on("finish", async () => {
-      // Génère une URL signée valable longtemps
-      const [url] = await blob.getSignedUrl({
-        action: "read",
-        expires: "03-09-2100"
+      /* ---- 3) Upload vers Firebase Storage ---- */
+      await blob.save(processedBuffer, {
+        metadata: { contentType: 'image/webp' },
+        predefinedAcl: 'private'
       });
 
-      // Mets à jour Firestore avec l'URL de la photo
-      await db.collection("annonces").doc(memberId).set({
+      /* ---- 4) URL signée courte (24 h) ---- */
+      const [url] = await blob.getSignedUrl({
+        action : 'read',
+        expires: Date.now() + 24 * 60 * 60 * 1000   // 24 h
+      });
+
+      /* ---- 5) Mise à jour Firestore ---- */
+      await db.collection('annonces').doc(memberId).set({
         photoURL: url
-      }, { merge: true });
+      }, { merge:true });
 
-      res.json({ success: true, photoURL: url });
-    });
+      res.json({ success:true, photoURL:url });
 
-    blobStream.on("error", (err) => {
-      console.error("[Annonce] Erreur upload photo :", err);
-      res.status(500).json({ success: false, error: err.message });
-    });
-  } catch (err) {
-    console.error("[Annonce] Erreur upload-photo :", err);
-    res.status(500).json({ success: false, error: err.message });
+    } catch (err) {
+      console.error('[Annonce] Erreur upload-photo sécurisé :', err);
+      res.status(500).json({ success:false, error:err.message });
+    }
   }
-});
+);
 
 
 
