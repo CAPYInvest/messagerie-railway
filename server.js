@@ -167,9 +167,12 @@ app.use('/api/process-daily-recording', callReportRouter);
 
 
 
+// ------------------------------------------------------------------------------------
+// FONCTION Pour laisser des avis utilisateurs sur les annonces 
+// ------------------------------------------------------------------------------------
 
-
-
+const userreviewsRouter = require("./userreviews");
+app.use("/api/review", userreviewsRouter);
 
 
 
