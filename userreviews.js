@@ -7,6 +7,7 @@ const db = admin.firestore();
 const reviewsCollection = db.collection("user_reviews");
 
 // 1. Lister les avis (publique)
+// userreviews.js
 router.get('/list/:conseillerId', async (req, res) => {
   try {
     const { conseillerId } = req.params;
@@ -29,9 +30,12 @@ router.get('/list/:conseillerId', async (req, res) => {
     });
     res.json({ success: true, reviews });
   } catch (err) {
+    // 👇 Ajoute ce log si tu veux comprendre
+    console.error('[API REVIEW LIST ERROR]', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 // 2. Ajouter ou éditer un avis (authentifié)
 router.post('/add', requireAuth, async (req, res) => {
