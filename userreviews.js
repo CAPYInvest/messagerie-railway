@@ -40,9 +40,10 @@ router.get('/list/:conseillerId', async (req, res) => {
 // 2. Ajouter ou éditer un avis (authentifié)
 router.post('/add', requireAuth, async (req, res) => {
   try {
-    const { conseillerId, note, text } = req.body;
+    const { conseillerId, note, text, nom, prenom } = req.body;
     const userId = req.member.uid;              // du token
-    const userName = req.member.name || "Utilisateur"; // ou autre attribut
+    const userName = (nom && prenom) ? (prenom + " " + nom) : "Utilisateur";
+     
 
     if (!conseillerId || !note || !text)
       return res.status(400).json({ success: false, error: "Champs manquants" });
@@ -72,7 +73,8 @@ router.post('/add', requireAuth, async (req, res) => {
         text,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+        });
+
       return res.json({ success: true, update: false });
     }
   } catch (err) {
