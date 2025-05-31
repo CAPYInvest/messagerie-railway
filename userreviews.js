@@ -1,17 +1,12 @@
-// userreviews.js
 const express = require('express');
 const router = express.Router();
 const admin = require("firebase-admin");
-const { requireAuth } = require('./middlewareauth'); // Ton middleware !
+const { requireAuth } = require('./middlewareauth'); // ton middleware JWT
 
 const db = admin.firestore();
 const reviewsCollection = db.collection("user_reviews");
 
-
-
-
-
-// 1. Liste des avis pour un conseiller
+// 1. Lister les avis (publique)
 router.get('/list/:conseillerId', async (req, res) => {
   try {
     const { conseillerId } = req.params;
@@ -38,21 +33,17 @@ router.get('/list/:conseillerId', async (req, res) => {
   }
 });
 
-
-
-
-
-// 2. Ajouter / modifier un avis (auth obligatoire)
+// 2. Ajouter ou éditer un avis (authentifié)
 router.post('/add', requireAuth, async (req, res) => {
   try {
     const { conseillerId, note, text } = req.body;
-    const userId = req.member.uid;  // uid Memberstack (depuis le token)
-    const userName = req.member.name || "Utilisateur";
+    const userId = req.member.uid;              // du token
+    const userName = req.member.name || "Utilisateur"; // ou autre attribut
 
-    if (!conseillerId || !userId || !note || !text)
+    if (!conseillerId || !note || !text)
       return res.status(400).json({ success: false, error: "Champs manquants" });
 
-    // Un seul avis par user/conseiller
+    // Un user = un avis max par conseiller
     const snapshot = await reviewsCollection
       .where("conseillerId", "==", conseillerId)
       .where("userId", "==", userId)
@@ -60,17 +51,15 @@ router.post('/add', requireAuth, async (req, res) => {
       .get();
 
     if (!snapshot.empty) {
-      // Mise à jour
+      // MAJ existant
       const docId = snapshot.docs[0].id;
       await reviewsCollection.doc(docId).set({
-        note,
-        text,
-        userName,
+        note, text, userName,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
       return res.json({ success: true, update: true });
     } else {
-      // Ajout
+      // Nouveau
       await reviewsCollection.add({
         conseillerId,
         userId,
@@ -87,21 +76,15 @@ router.post('/add', requireAuth, async (req, res) => {
   }
 });
 
-
-
-
-
-
-// 3. Supprimer SON avis (auth obligatoire)
+// 3. Supprimer SON propre avis (authentifié)
 router.delete('/delete', requireAuth, async (req, res) => {
   try {
     const { conseillerId } = req.body;
     const userId = req.member.uid;
-
-    if (!conseillerId || !userId)
+    if (!conseillerId)
       return res.status(400).json({ success: false, error: "Champs manquants" });
 
-    // On trouve le bon doc
+    // Cherche l'avis à supprimer
     const snapshot = await reviewsCollection
       .where("conseillerId", "==", conseillerId)
       .where("userId", "==", userId)
