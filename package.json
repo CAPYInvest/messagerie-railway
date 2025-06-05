@@ -1,11 +1,11 @@
 {
-    "name": "messagerie-railway",
+    "name": "capy-invest",
     "version": "1.0.0",
-    "description": "Test de messagerie simple via Railway",
+    "description": "Plateforme de mise en relation entre épargnants et conseillers financiers",
     "main": "server.js",
     "scripts": {
         "start": "node server.js",
-        "build": "echo \"No build step necessary\""
+        "dev": "nodemon server.js"
     },
     "dependencies": {
         "@google-cloud/aiplatform": "^4.1.0",
@@ -16,20 +16,27 @@
         "cors": "^2.8.5",
         "docx": "^9.3.0",
         "docxtemplater": "^3.62.2",
-        "dotenv": "^16.4.7",
-        "express": "^4.21.2",
+        "dotenv": "^16.3.1",
+        "express": "^4.18.2",
         "express-rate-limit": "^7.5.0",
         "express-validator": "^7.2.1",
         "firebase": "^11.5.0",
         "firebase-admin": "^13.4.0",
+        "googleapis": "^126.0.1",
         "helmet": "^8.1.0",
         "jsonwebtoken": "^9.0.2",
         "mime-types": "^3.0.1",
+        "moment": "^2.29.4",
+        "moment-timezone": "^0.5.43",
         "multer": "^1.4.5-lts.2",
         "openai": "^4.93.0",
         "pizzip": "^3.2.0",
         "sharp": "^0.34.2",
+        "sib-api-v3-sdk": "^8.5.0",
         "socket.io": "^4.8.1",
         "svix": "^1.64.0"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.1"
     }
 }

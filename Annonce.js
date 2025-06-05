@@ -118,14 +118,12 @@ router.post('/upload-photo',
       /* ---- 3) Upload vers Firebase Storage ---- */
       await blob.save(processedBuffer, {
         metadata: { contentType: 'image/webp' },
-        predefinedAcl: 'private'
+        predefinedAcl: 'publicRead'
       });
 
-      /* ---- 4) URL signée courte (24 h) ---- */
-      const [url] = await blob.getSignedUrl({
-        action : 'read',
-        expires: Date.now() + 24 * 60 * 60 * 1000   // 24 h
-      });
+      /* ---- 4) Génération URL  ---- */
+      const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media`;
+
 
       /* ---- 5) Mise à jour Firestore ---- */
       await db.collection('annonces').doc(memberId).set({
