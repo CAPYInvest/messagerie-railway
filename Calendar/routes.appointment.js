@@ -8,10 +8,10 @@ const router = express.Router();
 const Appointment = require('./Appointment');
 const googleCalendar = require('./googleCalendar');
 const emailService = require('./emailService');
-const { authMiddleware } = require('../middleware/auth');
+const { requireAuth } = require('../middlewareauth');
 
 // Middleware d'authentification pour toutes les routes
-router.use(authMiddleware);
+router.use(requireAuth);
 
 // Endpoint pour récupérer les créneaux disponibles d'un conseiller
 router.get('/availability/:conseillerId', async (req, res) => {
