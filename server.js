@@ -111,7 +111,7 @@ const io = new Server(httpServer, {
 
 io.on('connection', (socket) => {
   console.log('Un client est connecté à Socket.io :', socket.id);
-  // AJOUT VISIOCONF : Écouter l’événement "register" pour enregistrer le memberId
+  // AJOUT VISIOCONF : Écouter l'événement "register" pour enregistrer le memberId
   // DE : socket.on('register', (data) => {
   // A : console.log(`Client déconnecté : ${socket.memberId}`);
    // Écoute de l'enregistrement du memberId
@@ -145,7 +145,7 @@ io.on('connection', (socket) => {
 });
 
 // -------------------------------------------------------------------
-// FONCTION SIMPLE D’ÉCHAPPEMENT (évite XSS en transformant <, >, etc.)
+// FONCTION SIMPLE D'ÉCHAPPEMENT (évite XSS en transformant <, >, etc.)
 // -------------------------------------------------------------------
 function sanitizeString(str) {
   return str
@@ -240,7 +240,7 @@ function formatTime(ts) {
 
 
 // ----------------------------------------------
-// ROUTE 1 : POST /api/messages (ajout d’un message)
+// ROUTE 1 : POST /api/messages (ajout d'un message)
 // ----------------------------------------------
 app.post('/api/messages', requireAuth, async (req, res) => {
   try {
@@ -274,7 +274,7 @@ app.post('/api/messages', requireAuth, async (req, res) => {
 
     return res.json({ success: true, message: 'Message enregistré', id: docRef.id });
   } catch (error) {
-    console.error('Erreur lors de l’ajout du message :', error);
+    console.error('Erreur lors de l\'ajout du message :', error);
     return res.status(500).json({ error: 'Erreur interne' });
   }
 });
@@ -452,7 +452,7 @@ app.get('/api/unread', requireAuth, async (req, res) => {
 
 // ---------------------------------------------------------------------
 // ROUTE 5 : PUT /api/messages/:id
-// Permet de modifier un message existant si on est l’expéditeur
+// Permet de modifier un message existant si on est l'expéditeur
 // ---------------------------------------------------------------------
 app.put('/api/messages/:id', requireAuth, async (req, res) => {
   try {
@@ -472,7 +472,7 @@ app.put('/api/messages/:id', requireAuth, async (req, res) => {
     }
 
     const messageData = docSnap.data();
-    // Vérification : seul l’expéditeur peut modifier
+    // Vérification : seul l'expéditeur peut modifier
     if (messageData.senderId !== userId) {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
@@ -507,7 +507,7 @@ app.put('/api/messages/:id', requireAuth, async (req, res) => {
 
 //---------------------------------------------------------------------
 // ROUTE 6 : DELETE /api/messages/:id
-// Permet de supprimer un message si on est l’expéditeur
+// Permet de supprimer un message si on est l'expéditeur
 //---------------------------------------------------------------------
 app.delete('/api/messages/:id', requireAuth, async (req, res) => {
   try {
@@ -527,7 +527,7 @@ app.delete('/api/messages/:id', requireAuth, async (req, res) => {
     }
 
     const messageData = docSnap.data();
-    // Vérification : seul l’expéditeur peut supprimer
+    // Vérification : seul l'expéditeur peut supprimer
     if (messageData.senderId !== userId) {
       return res.status(403).json({ error: 'Action non autorisée' });
     }
@@ -705,7 +705,7 @@ app.get('/api/files', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Les paramètres senderId et recipientId sont requis.' });
     }
 
-    // Accès via l’Admin SDK
+    // Accès via l'Admin SDK
     const filesCollection = db.collection('sharedFiles');
     
     // Requête 1 : senderId -> recipientId
@@ -826,12 +826,14 @@ app.get('/api/signed-url', requireAuth, async (req, res) => {
     return res.json({ signedUrl });
     
   } catch (error) {
-    console.error("Erreur lors de la génération de l’URL signée :", error);
+    console.error("Erreur lors de la génération de l'URL signée :", error);
     return res.status(500).json({ error: error.message });
   }
 });
 
-
+// Ajout des routes de rendez-vous (prise de RDV)
+const appointmentRoutes = require('./Calendar/routes.appointment');
+app.use('/api/appointments', appointmentRoutes);
 
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
