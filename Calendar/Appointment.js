@@ -3,22 +3,9 @@
  * @module models/Appointment
  */
 
-const mongoose = require('mongoose');
 const { sendAppointmentConfirmation } = require('./emailService');
 
-const appointmentSchema = new mongoose.Schema({
-  id: { type: String, required: true },
-  conseillerId: { type: String, required: true },
-  clientId: { type: String, required: true },
-  startTime: { type: Date, required: true },
-  endTime: { type: Date, required: true },
-  status: { type: String, required: true }, // 'pending', 'confirmed', 'cancelled'
-  type: { type: String, required: true }, // 'initial', 'followup', 'custom'
-  googleEventId: { type: String },
-  notes: { type: String },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now }
-});
+
 
 class Appointment {
   constructor(data) {
@@ -90,5 +77,5 @@ class Appointment {
   }
 }
 
-module.exports = mongoose.model('Appointment', appointmentSchema);
+module.exports = Appointment;
 
