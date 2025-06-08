@@ -198,6 +198,21 @@ app.use('/api/process-daily-recording', callReportRouter);
 const userreviewsRouter = require("./userreviews");
 app.use("/api/review", userreviewsRouter);
 
+// ------------------------------------------------------------------------------------
+// ROUTES POUR LA GESTION DU CALENDRIER ET LA SYNCHRONISATION GOOGLE CALENDAR
+// ------------------------------------------------------------------------------------
+
+// Import des routes calendrier
+const calendarEventsRouter = require('./Calendar/routes.calendarEvents');
+const googleSyncRouter = require('./Calendar/routes.googleSync');
+
+// Utilisation des routes calendrier
+app.use('/api/calendar', calendarEventsRouter);
+app.use('/api/google-sync', googleSyncRouter);
+
+// Log pour confirmation
+console.log("Routes du calendrier configurées");
+
 
 
 
