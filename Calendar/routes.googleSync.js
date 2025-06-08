@@ -6,7 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const googleCalendarService = require('./googleCalendar');
-const { verifyToken } = require('../middleware/auth');
+const { requireAuth } = require('../middlewareauth');
 const admin = require('firebase-admin');
 
 // État de synchronisation en mémoire
@@ -20,7 +20,7 @@ let syncState = {
 /**
  * Route de callback pour l'authentification Google
  */
-router.post('/callback', verifyToken, async (req, res) => {
+router.post('/callback', requireAuth, async (req, res) => {
     try {
         console.log('[Google Sync] Réception du callback Google');
         console.log('[Google Sync] Headers:', req.headers);
@@ -86,7 +86,7 @@ router.post('/callback', verifyToken, async (req, res) => {
 /**
  * Route pour démarrer la synchronisation
  */
-router.post('/sync', verifyToken, async (req, res) => {
+router.post('/sync', requireAuth, async (req, res) => {
     try {
         if (syncState.isSyncing) {
             return res.status(400).json({ error: 'Une synchronisation est déjà en cours' });
@@ -119,7 +119,7 @@ router.post('/sync', verifyToken, async (req, res) => {
 /**
  * Route pour vérifier le statut de la synchronisation
  */
-router.get('/status', verifyToken, (req, res) => {
+router.get('/status', requireAuth, (req, res) => {
     console.log('[Google Sync] Vérification du statut de synchronisation');
     console.log('[Google Sync] État actuel:', syncState);
     res.json(syncState);
