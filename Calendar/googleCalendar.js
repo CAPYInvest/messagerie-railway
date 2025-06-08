@@ -47,6 +47,16 @@ class GoogleCalendarService {
         redirectUri: this.oauth2Client._redirectUri
       });
 
+      // Vérifier que l'URI de redirection correspond
+      if (this.oauth2Client._redirectUri !== googleConfig.redirectUri) {
+        console.log('[Google Calendar] Mise à jour de l\'URI de redirection');
+        this.oauth2Client = new google.auth.OAuth2(
+          googleConfig.clientId,
+          googleConfig.clientSecret,
+          googleConfig.redirectUri
+        );
+      }
+
       const { tokens } = await this.oauth2Client.getToken(code);
       console.log('[Google Calendar] Tokens reçus avec succès:', {
         access_token: tokens.access_token ? 'Présent' : 'Absent',
