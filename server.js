@@ -23,7 +23,11 @@ const upload = multer({ storage: multer.memoryStorage() });
 const helmet     = require('helmet');
 const rateLimit  = require('express-rate-limit');
 
-
+// Vérification des variables d'environnement requises
+if (!process.env.MEMBERSTACK_SECRET_TOKEN) {
+    console.error('❌ ERREUR: MEMBERSTACK_SECRET_TOKEN n\'est pas défini dans les variables d\'environnement');
+    process.exit(1);
+}
 
 // Initialisation firebase admin pour pouvoir avoir acccès au Storage
 const admin = require('firebase-admin');
