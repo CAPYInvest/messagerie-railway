@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const googleCalendar = require('./googleCalendar');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth } = require('../middlewareauth');
 
 // État de synchronisation global
 let syncState = {
@@ -10,17 +10,17 @@ let syncState = {
     lastError: null
 };
 
-// Route pour vérifier le statut de synchronisation
+// Route pour vérifier le statut de synchronisation (pas besoin d'auth)
 router.get('/status', (req, res) => {
     console.log('[Google Sync] Vérification du statut de synchronisation');
     console.log('[Google Sync] État actuel:', syncState);
     res.json(syncState);
 });
 
-// Route pour démarrer la synchronisation
+// Route pour démarrer la synchronisation (nécessite auth)
 router.post('/sync', requireAuth, async (req, res) => {
     try {
-        console.log('[Google Sync] Démarrage de la synchronisation pour utilisateur:', req.user.id);
+        console.log('[Google Sync] Démarrage de la synchronisation pour utilisateur:', req.member.uid);
         
         if (syncState.isSyncing) {
             console.log('[Google Sync] Une synchronisation est déjà en cours');
@@ -65,10 +65,10 @@ router.post('/sync', requireAuth, async (req, res) => {
     }
 });
 
-// Route pour l'authentification Google
-router.post('/auth', requireAuth, async (req, res) => {
+// Route pour l'authentification Google (pas besoin d'auth)
+router.post('/auth', async (req, res) => {
     try {
-        console.log('[Google Sync] Demande d\'authentification pour utilisateur:', req.user.id);
+        console.log('[Google Sync] Demande d\'authentification');
         
         const authUrl = googleCalendar.getAuthUrl();
         console.log('[Google Sync] URL d\'authentification générée:', authUrl);
