@@ -11,13 +11,13 @@ router.post('/login', async (req, res) => {
   console.log('[Auth] Body:', req.body);
   
   const memberData = req.body;
-  if (!memberData || !memberData.id) {
+  if (!memberData || !memberData.memberId) {
     console.error('[Auth] Données membres manquantes:', memberData);
     return res.status(400).json({ error: 'Données membres manquantes.' });
   }
 
   try {
-    const payload = { uid: memberData.id };
+    const payload = { uid: memberData.memberId };
     console.log('[Auth] Génération du token pour:', payload);
     
     // Générer un token personnalisé avec une expiration d'1 heure
