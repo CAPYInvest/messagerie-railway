@@ -456,12 +456,6 @@ router.post('/sync', requireAuth, async (req, res) => {
             refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
           };
           
-          // Mettre à jour les tokens dans la base de données
-          await syncStatesCollection.doc(req.userId).update({
-            googleTokens: syncState.googleTokens,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          });
-          
           console.log('[Calendar Events] Token rafraîchi avec succès');
           
           // Reconfigurer les credentials avec les nouveaux tokens
@@ -734,11 +728,9 @@ async function createGoogleCalendarEvent(userId, eventData) {
           refresh_token: syncState.googleTokens.refresh_token
         };
         
-        // Mettre à jour les tokens dans la base de données
-        await syncStatesCollection.doc(userId).update({
-          googleTokens: syncState.googleTokens,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+        // NOTE: Nous n'utilisons pas Firestore pour stocker les tokens, tout est en mémoire
+        // donc nous supprimons cette partie qui causait l'erreur
+        console.log('[Calendar Events] Token rafraîchi avec succès');
         
         // Reconfigurer les credentials avec les nouveaux tokens
         googleCalendarService.setCredentials(syncState.googleTokens);
@@ -784,11 +776,8 @@ async function createGoogleCalendarEvent(userId, eventData) {
       
       // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
       syncState.isConnected = false;
-      await syncStatesCollection.doc(userId).update({
-        isConnected: false,
-        googleConnectionStatus: 'Déconnecté - Token expiré',
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
+      // NOTE: Nous n'utilisons pas Firestore pour stocker les tokens, tout est en mémoire
+      // donc nous supprimons cette partie qui causait l'erreur
     }
     
     throw error;
