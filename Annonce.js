@@ -106,7 +106,7 @@ router.post('/upload-photo',
 
       /* ---- 2) Traitement image (strip EXIF, resize) ---- */
       const transformer = sharp(file.buffer)
-        .rotate()                       // respecte l’orientation EXIF puis…
+        .rotate()                       // respecte l'orientation EXIF puis…
         .resize({ width: 800, height: 800, fit: 'inside' })
         .toFormat('webp', { quality: 85 })      // convertit tout en WebP
 
@@ -121,9 +121,11 @@ router.post('/upload-photo',
         predefinedAcl: 'publicRead'
       });
 
-      /* ---- 4) Génération URL  ---- */
-      const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media`;
-
+      /* ---- 4) Génération URL signée ---- */
+      const [url] = await blob.getSignedUrl({
+        action: 'read',
+        expires: '03-01-2500' // Date très lointaine pour une URL "permanente"
+      });
 
       /* ---- 5) Mise à jour Firestore ---- */
       await db.collection('annonces').doc(memberId).set({
@@ -152,7 +154,7 @@ router.get("/list", async (req, res) => {
     // Extraction des filtres & pagination (à adapter plus tard !)
     // const { page = 1, limit = 20, tri, ... } = req.query;
 
-    // 1. On récupère TOUTES les annonces “publiées”
+    // 1. On récupère TOUTES les annonces "publiées"
     const snapshot = await db.collection("annonces")
       .where("step5.statutPublication", "==", "Oui")
       .orderBy("updatedAt", "desc") // plus récent en premier
@@ -247,7 +249,7 @@ const searchValidators = [
 
 
 
-// Fonction de “normalisation” Supprimer accents, minusculiser, enlever ponctuation pour matcher plus large
+// Fonction de "normalisation" Supprimer accents, minusculiser, enlever ponctuation pour matcher plus large
 function normalize(str) {
   return (str || "")
     .toLowerCase()
