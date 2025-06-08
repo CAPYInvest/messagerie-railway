@@ -444,6 +444,38 @@ router.post('/sync', requireAuth, async (req, res) => {
       // Configurer les credentials pour cet utilisateur
       googleCalendarService.setCredentials(syncState.googleTokens);
       
+      // AJOUT: Vérifier et rafraîchir le token si nécessaire
+      try {
+        if (syncState.googleTokens.refresh_token) {
+          console.log('[Calendar Events] Tentative de rafraîchissement préventif du token');
+          const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
+          
+          // Mettre à jour les tokens dans la mémoire
+          syncState.googleTokens = {
+            ...newTokens,
+            refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
+          };
+          
+          // Mettre à jour les tokens dans la base de données
+          await syncStatesCollection.doc(req.userId).update({
+            googleTokens: syncState.googleTokens,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+          
+          console.log('[Calendar Events] Token rafraîchi avec succès');
+          
+          // Reconfigurer les credentials avec les nouveaux tokens
+          googleCalendarService.setCredentials(syncState.googleTokens);
+        } else {
+          console.log('[Calendar Events] Pas de refresh_token disponible');
+        }
+      } catch (refreshError) {
+        console.error('[Calendar Events] Erreur lors du rafraîchissement du token:', refreshError);
+        return res.status(401).json({ 
+          error: 'Erreur d\'authentification Google Calendar. Veuillez vous reconnecter.' 
+        });
+      }
+      
       // Récupérer les événements de Google Calendar
       const calendar = google.calendar({ version: 'v3', auth: googleCalendarService.oauth2Client });
       
@@ -686,28 +718,81 @@ async function createGoogleCalendarEvent(userId, eventData) {
     throw new Error('Google Calendar n\'est pas connecté');
   }
   
-  // Configurer les credentials pour cet utilisateur
-  googleCalendarService.setCredentials(syncState.googleTokens);
-  
-  // Créer l'événement
-  const calendar = google.calendar({ version: 'v3' });
-  const response = await calendar.events.insert({
-    calendarId: 'primary',
-    requestBody: {
-      summary: eventData.title,
-      description: eventData.description,
-      start: {
-        dateTime: eventData.start.toISOString(),
-        timeZone: 'Europe/Paris'
-      },
-      end: {
-        dateTime: eventData.end.toISOString(),
-        timeZone: 'Europe/Paris'
+  try {
+    // Configurer les credentials pour cet utilisateur
+    googleCalendarService.setCredentials(syncState.googleTokens);
+    
+    // Rafraîchir le token si nécessaire
+    if (syncState.googleTokens.refresh_token) {
+      try {
+        console.log('[Calendar Events] Tentative de rafraîchissement du token avant création d\'événement');
+        const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
+        
+        // Mettre à jour les tokens dans la mémoire
+        syncState.googleTokens = {
+          ...newTokens,
+          refresh_token: syncState.googleTokens.refresh_token
+        };
+        
+        // Mettre à jour les tokens dans la base de données
+        await syncStatesCollection.doc(userId).update({
+          googleTokens: syncState.googleTokens,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Reconfigurer les credentials avec les nouveaux tokens
+        googleCalendarService.setCredentials(syncState.googleTokens);
+      } catch (refreshError) {
+        console.error('[Calendar Events] Erreur lors du rafraîchissement du token:', refreshError);
+        // Continuer malgré l'erreur
       }
     }
-  });
-  
-  return response.data;
+    
+    // Créer l'événement
+    const calendar = google.calendar({ version: 'v3', auth: googleCalendarService.oauth2Client });
+    
+    console.log(`[Calendar Events] Tentative de création d'événement Google Calendar:`, {
+      summary: eventData.title,
+      start: eventData.start.toISOString(),
+      end: eventData.end.toISOString()
+    });
+    
+    const response = await calendar.events.insert({
+      calendarId: 'primary',
+      requestBody: {
+        summary: eventData.title,
+        description: eventData.description,
+        start: {
+          dateTime: eventData.start.toISOString(),
+          timeZone: 'Europe/Paris'
+        },
+        end: {
+          dateTime: eventData.end.toISOString(),
+          timeZone: 'Europe/Paris'
+        }
+      }
+    });
+    
+    console.log(`[Calendar Events] Événement Google Calendar créé avec succès: ${response.data.id}`);
+    return response.data;
+  } catch (error) {
+    console.error('[Calendar Events] Erreur lors de la création de l\'événement Google Calendar:', error);
+    
+    // Si l'erreur est une erreur d'authentification (401), essayons de reconnecter l'utilisateur
+    if (error.code === 401 || (error.response && error.response.status === 401)) {
+      console.error('[Calendar Events] Erreur d\'authentification 401 - Token expiré ou invalide');
+      
+      // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
+      syncState.isConnected = false;
+      await syncStatesCollection.doc(userId).update({
+        isConnected: false,
+        googleConnectionStatus: 'Déconnecté - Token expiré',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    
+    throw error;
+  }
 }
 
 /**
