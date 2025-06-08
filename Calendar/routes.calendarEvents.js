@@ -506,9 +506,12 @@ router.post('/sync', requireAuth, async (req, res) => {
             return; // Ignorer si pas de date
           }
           
-          // Créer l'événement dans Firestore
+          // Vérifier que le membre existe dans la base de données
+          console.log(`[Calendar Events] Import - MemberId utilisé: ${req.userId}`);
+          
+          // Créer l'événement dans Firestore avec le même memberId que l'utilisateur courant
           const eventData = {
-            userId: req.userId,
+            userId: req.userId, // Utiliser le memberId de l'utilisateur connecté
             title: googleEvent.summary || 'Sans titre',
             start: admin.firestore.Timestamp.fromDate(startDate),
             end: admin.firestore.Timestamp.fromDate(endDate),
@@ -519,7 +522,9 @@ router.post('/sync', requireAuth, async (req, res) => {
             importedFromGoogle: true
           };
           
-          await eventsCollection.add(eventData);
+          // Enregistrer l'événement dans Firestore
+          const docRef = await eventsCollection.add(eventData);
+          console.log(`[Calendar Events] Événement Google importé: ${docRef.id} pour utilisateur ${req.userId}`);
           created++;
         } catch (error) {
           console.error(`[Calendar Events] Erreur lors de l'importation d'un événement Google:`, error);
