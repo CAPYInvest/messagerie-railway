@@ -17,10 +17,28 @@ let syncState = {
     googleTokens: null
 };
 
+// Middleware temporaire pour le débogage
+const debugMiddleware = (req, res, next) => {
+    console.log('[Google Sync Debug] Requête reçue:', req.method, req.path);
+    console.log('[Google Sync Debug] Headers:', req.headers);
+    console.log('[Google Sync Debug] Body:', req.body);
+    
+    // Ajout d'en-têtes CORS
+    res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
+    next();
+};
+
+// Appliquer le middleware de débogage à toutes les routes
+router.use(debugMiddleware);
+
 /**
  * Route de callback pour l'authentification Google
  */
-router.post('/callback', requireAuth, async (req, res) => {
+router.post('/callback', async (req, res) => {
     try {
         console.log('[Google Sync] Réception du callback Google');
         console.log('[Google Sync] Headers:', req.headers);
@@ -86,7 +104,7 @@ router.post('/callback', requireAuth, async (req, res) => {
 /**
  * Route pour démarrer la synchronisation
  */
-router.post('/sync', requireAuth, async (req, res) => {
+router.post('/sync', async (req, res) => {
     try {
         if (syncState.isSyncing) {
             return res.status(400).json({ error: 'Une synchronisation est déjà en cours' });
@@ -119,7 +137,7 @@ router.post('/sync', requireAuth, async (req, res) => {
 /**
  * Route pour vérifier le statut de la synchronisation
  */
-router.get('/status', requireAuth, (req, res) => {
+router.get('/status', (req, res) => {
     console.log('[Google Sync] Vérification du statut de synchronisation');
     console.log('[Google Sync] État actuel:', syncState);
     res.json(syncState);
@@ -138,6 +156,15 @@ router.post('/auth', async (req, res) => {
         console.error('[Google Sync] Erreur lors de la génération de l\'URL d\'authentification:', error);
         res.status(500).json({ error: error.message });
     }
+});
+
+// Gérer les requêtes OPTIONS
+router.options('*', (req, res) => {
+    res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.sendStatus(200);
 });
 
 module.exports = router; 
