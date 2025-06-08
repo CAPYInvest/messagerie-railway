@@ -30,7 +30,10 @@ class GoogleCalendarService {
     const url = this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: googleConfig.scopes,
-      prompt: 'consent'
+      // Forcer l'affichage du consentement pour obtenir un refresh_token
+      prompt: 'consent',
+      // Inclure l'état pour éviter les attaques CSRF
+      state: Date.now().toString()
     });
     console.log('[Google Calendar] URL d\'authentification générée:', url);
     return url;
@@ -57,7 +60,18 @@ class GoogleCalendarService {
         );
       }
 
-      const { tokens } = await this.oauth2Client.getToken(code);
+      // Définir un délai d'attente pour la requête
+      const tokenPromise = this.oauth2Client.getToken(code);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Délai d\'attente dépassé')), 10000);
+      });
+
+      const { tokens } = await Promise.race([tokenPromise, timeoutPromise]);
+
+      if (!tokens) {
+        throw new Error('Aucun token reçu de Google');
+      }
+
       console.log('[Google Calendar] Tokens reçus avec succès:', {
         access_token: tokens.access_token ? 'Présent' : 'Absent',
         refresh_token: tokens.refresh_token ? 'Présent' : 'Absent',
@@ -68,11 +82,19 @@ class GoogleCalendarService {
       return tokens;
     } catch (error) {
       console.error('[Google Calendar] Erreur lors de l\'échange du code:', error);
+      
+      // Gestion spécifique des erreurs Google OAuth
+      if (error.message && error.message.includes('invalid_grant')) {
+        console.error('[Google Calendar] Erreur invalid_grant - Le code a probablement expiré ou a déjà été utilisé');
+        throw new Error('Le code d\'autorisation a expiré ou a déjà été utilisé. Veuillez réessayer la synchronisation.');
+      }
+      
       console.error('[Google Calendar] Détails de l\'erreur:', {
         message: error.message,
         code: error.code,
         errors: error.errors
       });
+      
       throw error;
     }
   }
@@ -82,7 +104,15 @@ class GoogleCalendarService {
    */
   setCredentials(tokens) {
     console.log('[Google Calendar] Configuration des credentials');
-    this.oauth2Client.setCredentials(tokens);
+    try {
+      if (!tokens || !tokens.access_token) {
+        throw new Error('Tokens invalides');
+      }
+      this.oauth2Client.setCredentials(tokens);
+    } catch (error) {
+      console.error('[Google Calendar] Erreur lors de la configuration des credentials:', error);
+      throw error;
+    }
   }
 
   /**

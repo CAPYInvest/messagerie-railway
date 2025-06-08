@@ -94,54 +94,74 @@ router.post('/callback', async (req, res) => {
         console.log('[Google Sync] Code reçu:', code);
         const syncState = getUserSyncState(req.userId);
 
-        // Échange du code contre des tokens
-        try {
-            const tokens = await googleCalendarService.getTokens(code);
-            console.log('[Google Sync] Tokens reçus:', {
-                access_token: tokens.access_token ? 'Présent' : 'Absent',
-                refresh_token: tokens.refresh_token ? 'Présent' : 'Absent',
-                scope: tokens.scope,
-                token_type: tokens.token_type,
-                expiry_date: tokens.expiry_date
-            });
+        // Réinitialiser l'état de synchronisation
+        syncState.isSyncing = false;
+        syncState.progress = 0;
+        syncState.lastError = null;
 
-            // Stockage des tokens pour cet utilisateur
-            syncState.googleTokens = tokens;
-            
-            // Démarrage de la synchronisation
-            syncState.isSyncing = true;
-            syncState.progress = 0;
-            syncState.lastError = null;
+        // Échange du code contre des tokens avec mécanisme de réessai
+        let tokens = null;
+        let attempts = 0;
+        const maxAttempts = 2;
 
-            // Simulation de la synchronisation
-            setTimeout(() => {
-                syncState.isSyncing = false;
-                syncState.progress = 100;
-            }, 2000);
+        while (attempts < maxAttempts && !tokens) {
+            try {
+                attempts++;
+                console.log(`[Google Sync] Tentative ${attempts}/${maxAttempts} d'échange du code`);
+                tokens = await googleCalendarService.getTokens(code);
+                
+                console.log('[Google Sync] Tokens reçus:', {
+                    access_token: tokens.access_token ? 'Présent' : 'Absent',
+                    refresh_token: tokens.refresh_token ? 'Présent' : 'Absent',
+                    scope: tokens.scope,
+                    token_type: tokens.token_type,
+                    expiry_date: tokens.expiry_date
+                });
 
-            res.json({ success: true, message: 'Authentification réussie' });
-        } catch (error) {
-            console.error('[Google Sync] Erreur lors de l\'échange du code:', error);
-            console.error('[Google Sync] Stack trace:', error.stack);
-            console.error('[Google Sync] Détails de l\'erreur:', {
-                message: error.message,
-                code: error.code,
-                errors: error.errors,
-                response: error.response ? {
-                    status: error.response.status,
-                    statusText: error.response.statusText,
-                    data: error.response.data
-                } : null
-            });
-            throw error;
+                // Stockage des tokens pour cet utilisateur
+                syncState.googleTokens = tokens;
+                
+                // Démarrage de la synchronisation
+                syncState.isSyncing = true;
+                syncState.progress = 0;
+                syncState.lastError = null;
+
+                // Simulation de la synchronisation
+                setTimeout(() => {
+                    syncState.isSyncing = false;
+                    syncState.progress = 100;
+                }, 2000);
+
+                return res.json({ success: true, message: 'Authentification réussie' });
+            } catch (error) {
+                console.error(`[Google Sync] Erreur lors de la tentative ${attempts}:`, error.message);
+                
+                if (attempts >= maxAttempts || error.message.includes('expiré') || error.message.includes('déjà été utilisé')) {
+                    throw error;
+                }
+                
+                // Attendre un peu avant de réessayer
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
+
+        // Si on arrive ici, c'est qu'on a épuisé toutes les tentatives
+        throw new Error("Échec de l'authentification après plusieurs tentatives");
     } catch (error) {
         console.error('[Google Sync] Erreur lors du callback:', error);
         if (req.userId) {
             const syncState = getUserSyncState(req.userId);
             syncState.lastError = error.message;
+            syncState.isSyncing = false;
         }
-        res.status(500).json({ error: error.message });
+        
+        // Message d'erreur plus convivial
+        let errorMessage = error.message;
+        if (error.message.includes('invalid_grant') || error.message.includes('expiré') || error.message.includes('déjà été utilisé')) {
+            errorMessage = 'Le code d\'autorisation a expiré. Veuillez réessayer la synchronisation.';
+        }
+        
+        res.status(400).json({ error: errorMessage });
     }
 });
 
@@ -158,8 +178,8 @@ router.post('/sync', async (req, res) => {
 
         const syncState = getUserSyncState(req.userId);
         
+        // Réinitialiser l'état si la synchronisation est bloquée depuis plus de 5 minutes
         if (syncState.isSyncing) {
-            // Réinitialiser l'état si la synchronisation est bloquée depuis plus de 5 minutes
             const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
             if (syncState.syncStartedAt && syncState.syncStartedAt < fiveMinutesAgo) {
                 console.log('[Google Sync] Réinitialisation d\'une synchronisation bloquée');
@@ -169,33 +189,45 @@ router.post('/sync', async (req, res) => {
             }
         }
 
+        // Si nous n'avons pas de tokens, rediriger vers l'authentification
         if (!syncState.googleTokens) {
             console.log('[Google Sync] Génération de l\'URL d\'authentification');
             const authUrl = googleCalendarService.getAuthUrl();
             return res.json({ authUrl });
         }
 
-        // Configurer les credentials pour cet utilisateur
-        googleCalendarService.setCredentials(syncState.googleTokens);
+        try {
+            // Configurer les credentials pour cet utilisateur
+            googleCalendarService.setCredentials(syncState.googleTokens);
+            
+            syncState.isSyncing = true;
+            syncState.progress = 0;
+            syncState.lastError = null;
+            syncState.syncStartedAt = Date.now();
 
-        syncState.isSyncing = true;
-        syncState.progress = 0;
-        syncState.lastError = null;
-        syncState.syncStartedAt = Date.now();
+            // Simulation de la synchronisation
+            setTimeout(() => {
+                syncState.isSyncing = false;
+                syncState.progress = 100;
+                delete syncState.syncStartedAt;
+            }, 2000);
 
-        // Simulation de la synchronisation
-        setTimeout(() => {
-            syncState.isSyncing = false;
-            syncState.progress = 100;
-            delete syncState.syncStartedAt;
-        }, 2000);
-
-        res.json({ success: true, message: 'Synchronisation démarrée' });
+            res.json({ success: true, message: 'Synchronisation démarrée' });
+        } catch (error) {
+            console.error('[Google Sync] Erreur avec les tokens:', error);
+            
+            // Si les tokens sont invalides, rediriger vers l'authentification
+            console.log('[Google Sync] Tokens invalides, génération d\'une nouvelle URL d\'authentification');
+            syncState.googleTokens = null;
+            const authUrl = googleCalendarService.getAuthUrl();
+            return res.json({ authUrl });
+        }
     } catch (error) {
         console.error('[Google Sync] Erreur lors du démarrage de la synchronisation:', error);
         if (req.userId) {
             const syncState = getUserSyncState(req.userId);
             syncState.lastError = error.message;
+            syncState.isSyncing = false;
         }
         res.status(500).json({ error: error.message });
     }
