@@ -430,6 +430,110 @@ router.post('/sync', requireAuth, async (req, res) => {
       }
     });
 
+    // NOUVEAU: Importer les événements de Google Calendar
+    try {
+      console.log(`[Calendar Events] Importation des événements depuis Google Calendar pour l'utilisateur ${req.userId}`);
+      
+      // Configurer les credentials pour cet utilisateur
+      googleCalendarService.setCredentials(syncState.googleTokens);
+      
+      // Récupérer les événements de Google Calendar
+      const calendar = google.calendar({ version: 'v3' });
+      
+      // Définir la période pour les événements (3 mois avant et après aujourd'hui)
+      const now = new Date();
+      const threeMonthsAgo = new Date(now);
+      threeMonthsAgo.setMonth(now.getMonth() - 3);
+      const threeMonthsLater = new Date(now);
+      threeMonthsLater.setMonth(now.getMonth() + 3);
+      
+      const response = await calendar.events.list({
+        calendarId: 'primary',
+        timeMin: threeMonthsAgo.toISOString(),
+        timeMax: threeMonthsLater.toISOString(),
+        singleEvents: true,
+        orderBy: 'startTime'
+      });
+      
+      const googleEvents = response.data.items;
+      console.log(`[Calendar Events] ${googleEvents.length} événements récupérés depuis Google Calendar`);
+      
+      // Récupérer tous les IDs d'événements Google déjà existants
+      const existingGoogleIds = new Set();
+      const eventsSnapshot = await eventsCollection
+        .where('userId', '==', req.userId)
+        .where('googleEventId', '!=', null)
+        .get();
+      
+      eventsSnapshot.forEach(doc => {
+        const event = doc.data();
+        if (event.googleEventId) {
+          existingGoogleIds.add(event.googleEventId);
+        }
+      });
+      
+      // Traiter chaque événement Google
+      const importPromises = googleEvents.map(async (googleEvent) => {
+        try {
+          // Vérifier si l'événement est déjà importé
+          if (existingGoogleIds.has(googleEvent.id)) {
+            return; // Événement déjà importé, ignorer
+          }
+          
+          // Vérifier si l'événement a des dates valides
+          if (!googleEvent.start || !googleEvent.end) {
+            return; // Ignorer les événements sans dates
+          }
+          
+          // Convertir les dates
+          let startDate, endDate;
+          
+          if (googleEvent.start.dateTime) {
+            startDate = new Date(googleEvent.start.dateTime);
+          } else if (googleEvent.start.date) {
+            startDate = new Date(googleEvent.start.date);
+          } else {
+            return; // Ignorer si pas de date
+          }
+          
+          if (googleEvent.end.dateTime) {
+            endDate = new Date(googleEvent.end.dateTime);
+          } else if (googleEvent.end.date) {
+            endDate = new Date(googleEvent.end.date);
+            // Pour les événements d'une journée entière, la date de fin est exclusive
+            endDate.setDate(endDate.getDate() - 1);
+          } else {
+            return; // Ignorer si pas de date
+          }
+          
+          // Créer l'événement dans Firestore
+          const eventData = {
+            userId: req.userId,
+            title: googleEvent.summary || 'Sans titre',
+            start: admin.firestore.Timestamp.fromDate(startDate),
+            end: admin.firestore.Timestamp.fromDate(endDate),
+            description: googleEvent.description || '',
+            googleEventId: googleEvent.id,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            importedFromGoogle: true
+          };
+          
+          await eventsCollection.add(eventData);
+          created++;
+        } catch (error) {
+          console.error(`[Calendar Events] Erreur lors de l'importation d'un événement Google:`, error);
+          errors++;
+        }
+      });
+      
+      await Promise.all(importPromises);
+      console.log(`[Calendar Events] Importation terminée: ${created} événements importés`);
+    } catch (googleError) {
+      console.error("[Calendar Events] Erreur lors de l'importation depuis Google Calendar:", googleError);
+      errors++;
+    }
+
     // Attendre que toutes les opérations soient terminées
     await Promise.all(syncPromises);
     
