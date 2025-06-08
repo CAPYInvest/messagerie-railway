@@ -345,4 +345,8 @@ router.options('*', (req, res) => {
     res.sendStatus(200);
 });
 
-module.exports = router; 
+// Exporter à la fois le routeur et la fonction getUserSyncState
+module.exports = { 
+    router,
+    getUserSyncState
+}; 
