@@ -83,19 +83,6 @@ const db = admin.firestore();
 
 
 
-// 3) Express + Socket.io
-app.use(cors({
-  origin: 'https://capy-invest-fr.webflow.io',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
-app.use(express.json());
-
-
-
-
-
 //Import route token
 app.use('/api', authRoutes);
 
@@ -891,6 +878,9 @@ app.use('/api/appointments', appointmentRoutes);
 // Ajout des routes de synchronisation Google
 const googleSyncRoutes = require('./Calendar/routes.googleSync');
 app.use('/api/google/sync', googleSyncRoutes);
+
+// Route de compatibilité pour /api/google/auth
+app.use('/api/google', googleSyncRoutes);
 
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
