@@ -869,6 +869,39 @@ app.use('/Calendar', express.static('webflow/Calendar'));
 app.use('/webflow', express.static('webflow'));
 console.log("Fichiers statiques configurés pour les dossiers /Calendar et /webflow");
 
+
+
+
+// Middleware de logging pour le débogage des routes de calendrier
+app.use('/api/google', (req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  // Ajout d'en-têtes CORS spécifiques pour les routes de calendrier
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
+
+// Gestion des OPTIONS pour les routes de calendrier
+app.options('/api/google/*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
+Add comment
+
+
+
+
+
+
+
+
+
+
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
