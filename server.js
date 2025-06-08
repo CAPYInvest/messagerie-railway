@@ -882,6 +882,9 @@ app.use('/api/google/sync', googleSyncRoutes);
 // Route de compatibilité pour /api/google/auth
 app.use('/api/google', googleSyncRoutes);
 
+// Route de compatibilité pour /api/calendar
+app.use('/api/calendar', require('./Calendar/routes.calendarEvents'));
+
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
