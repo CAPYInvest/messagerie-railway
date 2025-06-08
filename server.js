@@ -24,7 +24,12 @@ const helmet     = require('helmet');
 const rateLimit  = require('express-rate-limit');
 
 // Configuration des middlewares
-app.use(cors());
+app.use(cors({
+    origin: ['https://capy-invest-fr.webflow.io', 'http://localhost:3000'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(helmet());
@@ -57,12 +62,6 @@ const db = admin.firestore();
 
 
 // 3) Express + Socket.io
-app.use(cors({
-  origin: 'https://capy-invest-fr.webflow.io',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
 app.use(express.json());
 
 
@@ -853,6 +852,12 @@ app.use('/api/google/sync', googleSyncRoutes);
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`Serveur Node.js + Socket.io démarré sur le port ${PORT}`);
+});
+
+// Middleware de gestion des erreurs
+app.use((err, req, res, next) => {
+    console.error('[Server] Erreur:', err);
+    res.status(500).json({ error: err.message });
 });
 
 
