@@ -34,13 +34,16 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Aucune donnée reçue.' });
     }
 
-    if (!memberData.memberId) {
+    // Accepter à la fois 'id' et 'memberId' pour la compatibilité
+    const memberId = memberData.id || memberData.memberId;
+    
+    if (!memberId) {
       console.error('[Auth] Données membres manquantes:', memberData);
       return res.status(400).json({ error: 'Données membres manquantes.' });
     }
 
     try {
-      const payload = { uid: memberData.memberId };
+      const payload = { uid: memberId };
       console.log('[Auth] Génération du token pour:', payload);
       
       if (!process.env.MEMBERSTACK_SECRET_TOKEN) {
