@@ -23,6 +23,12 @@ const upload = multer({ storage: multer.memoryStorage() });
 const helmet     = require('helmet');
 const rateLimit  = require('express-rate-limit');
 
+// Configuration des middlewares
+app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(helmet());
+
 // Vérification des variables d'environnement requises
 if (!process.env.MEMBERSTACK_SECRET_TOKEN) {
     console.error('❌ ERREUR: MEMBERSTACK_SECRET_TOKEN n\'est pas défini dans les variables d\'environnement');
