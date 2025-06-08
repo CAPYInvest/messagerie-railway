@@ -23,22 +23,44 @@ const upload = multer({ storage: multer.memoryStorage() });
 const helmet     = require('helmet');
 const rateLimit  = require('express-rate-limit');
 
-// Configuration des middlewares
+// Configuration CORS plus permissive
 app.use(cors({
-    origin: ['https://capy-invest-fr.webflow.io', 'http://localhost:3000'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
+  origin: '*', // Autorise toutes les origines
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  preflightContinue: true
 }));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(helmet());
 
-// Vérification des variables d'environnement requises
-if (!process.env.MEMBERSTACK_SECRET_TOKEN) {
-    console.error('❌ ERREUR: MEMBERSTACK_SECRET_TOKEN n\'est pas défini dans les variables d\'environnement');
-    process.exit(1);
-}
+// Middleware de logging pour le débogage
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  // Ajout d'en-têtes CORS pour toutes les requêtes
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
+
+// Middleware pour gérer les requêtes OPTIONS
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
+
+// Configuration des middlewares de base
+app.use(bodyParser.json({
+  verify: (req, res, buf, encoding) => {
+    req.rawBody = buf.toString(encoding || 'utf8');
+  }
+}));
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
 
 // Initialisation firebase admin pour pouvoir avoir acccès au Storage
 const admin = require('firebase-admin');
@@ -62,6 +84,12 @@ const db = admin.firestore();
 
 
 // 3) Express + Socket.io
+app.use(cors({
+  origin: 'https://capy-invest-fr.webflow.io',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 app.use(express.json());
 
 
@@ -283,11 +311,10 @@ app.post('/api/messages', requireAuth, async (req, res) => {
 
     return res.json({ success: true, message: 'Message enregistré', id: docRef.id });
   } catch (error) {
-    console.error('Erreur lors de l\'ajout du message :', error);
+    console.error("Erreur lors de l'ajout du message :", error);
     return res.status(500).json({ error: 'Erreur interne' });
   }
 });
-
 
 // ----------------------------------------------
 // ROUTE 2 : GET /api/messages?senderId=xxx&recipientId=yyy
@@ -341,7 +368,6 @@ app.get('/api/messages', requireAuth, async (req, res) => {
   }
 });
 
-
 // ----------------------------------------------
 // ROUTE 3 : GET /api/last-message?userId=....
 // ----------------------------------------------
@@ -389,9 +415,7 @@ app.get('/api/last-message', requireAuth, async (req, res) => {
     return res.status(500).json({ error: 'Erreur interne' });
   }
 
-
 });
-
 
 // ----------------------------------------------
 // ROUTE 4 : GET /api/unread?userId=xxx
@@ -840,6 +864,26 @@ app.get('/api/signed-url', requireAuth, async (req, res) => {
   }
 });
 
+// Middleware de logging pour le débogage des routes de calendrier
+app.use('/api/google', (req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  // Ajout d'en-têtes CORS spécifiques pour les routes de calendrier
+  res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
+
+// Gestion des OPTIONS pour les routes de calendrier
+app.options('/api/google/*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
+
 // Ajout des routes de rendez-vous (prise de RDV)
 const appointmentRoutes = require('./Calendar/routes.appointment');
 app.use('/api/appointments', appointmentRoutes);
@@ -853,11 +897,3 @@ const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`Serveur Node.js + Socket.io démarré sur le port ${PORT}`);
 });
-
-// Middleware de gestion des erreurs
-app.use((err, req, res, next) => {
-    console.error('[Server] Erreur:', err);
-    res.status(500).json({ error: err.message });
-});
-
-
