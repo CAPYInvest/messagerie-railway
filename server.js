@@ -835,8 +835,14 @@ app.get('/api/signed-url', requireAuth, async (req, res) => {
 const appointmentRoutes = require('./Calendar/routes.appointment');
 app.use('/api/appointments', appointmentRoutes);
 
+// Ajout des routes de synchronisation Google
+const googleSyncRoutes = require('./Calendar/routes.googleSync');
+app.use('/api/google/sync', googleSyncRoutes);
+
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`Serveur Node.js + Socket.io démarré sur le port ${PORT}`);
 });
+
+
