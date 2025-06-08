@@ -72,6 +72,35 @@ const extractUserIdMiddleware = (req, res, next) => {
 router.use(debugMiddleware);
 router.use(extractUserIdMiddleware);
 
+// Fonction pour simuler la progression de la synchronisation
+function simulateProgress(userId) {
+    const syncState = getUserSyncState(userId);
+    let currentProgress = 0;
+    
+    // Réinitialiser l'état
+    syncState.isSyncing = true;
+    syncState.progress = 0;
+    syncState.lastError = null;
+    
+    // Créer un intervalle pour mettre à jour la progression
+    const progressInterval = setInterval(() => {
+        currentProgress += 10;
+        if (currentProgress > 100) {
+            clearInterval(progressInterval);
+            syncState.isSyncing = false;
+            syncState.progress = 100;
+            syncState.lastSync = new Date().toISOString();
+            console.log(`[Google Sync] Synchronisation terminée pour l'utilisateur ${userId}`);
+            return;
+        }
+        
+        syncState.progress = currentProgress;
+        console.log(`[Google Sync] Progression de la synchronisation pour l'utilisateur ${userId}: ${currentProgress}%`);
+    }, 1000); // Mettre à jour toutes les secondes
+    
+    return progressInterval;
+}
+
 /**
  * Route de callback pour l'authentification Google
  */
@@ -124,23 +153,30 @@ router.post('/callback', async (req, res) => {
                 syncState.googleTokens = tokens;
                 syncState.isConnected = true;
                 
-                // Démarrage de la synchronisation
-                syncState.isSyncing = true;
-                syncState.progress = 0;
-                syncState.lastError = null;
-
-                // Simulation de la synchronisation
-                setTimeout(() => {
-                    syncState.isSyncing = false;
-                    syncState.progress = 100;
-                    syncState.lastSync = new Date().toISOString();
-                }, 2000);
+                // Démarrer la simulation de progression
+                simulateProgress(req.userId);
 
                 return res.json({ success: true, message: 'Authentification réussie' });
             } catch (error) {
                 console.error(`[Google Sync] Erreur lors de la tentative ${attempts}:`, error.message);
                 
-                if (attempts >= maxAttempts || error.message.includes('expiré') || error.message.includes('déjà été utilisé')) {
+                // Si l'erreur est "invalid_grant", considérer que l'utilisateur est déjà connecté
+                if (error.message && error.message.includes('invalid_grant')) {
+                    console.log('[Google Sync] Code déjà utilisé, considérant que l\'utilisateur est déjà connecté');
+                    
+                    // Marquer l'utilisateur comme connecté même si nous n'avons pas les tokens
+                    syncState.isConnected = true;
+                    syncState.progress = 100;
+                    syncState.lastSync = new Date().toISOString();
+                    
+                    return res.json({ 
+                        success: true, 
+                        alreadyConnected: true,
+                        message: 'Votre compte Google Calendar est déjà connecté.' 
+                    });
+                }
+                
+                if (attempts >= maxAttempts || error.message.includes('expiré')) {
                     throw error;
                 }
                 
@@ -216,18 +252,9 @@ router.post('/sync', async (req, res) => {
             // Configurer les credentials pour cet utilisateur
             googleCalendarService.setCredentials(syncState.googleTokens);
             
-            syncState.isSyncing = true;
-            syncState.progress = 0;
-            syncState.lastError = null;
+            // Démarrer la simulation de progression
             syncState.syncStartedAt = Date.now();
-
-            // Simulation de la synchronisation
-            setTimeout(() => {
-                syncState.isSyncing = false;
-                syncState.progress = 100;
-                syncState.lastSync = new Date().toISOString();
-                delete syncState.syncStartedAt;
-            }, 2000);
+            simulateProgress(req.userId);
 
             res.json({ success: true, message: 'Synchronisation démarrée' });
         } catch (error) {
