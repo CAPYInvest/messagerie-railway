@@ -14,6 +14,8 @@ const bodyParser = require('body-parser');
 // Importez le middleware d'authentification depuis middlewareauth.js et routes
 const { requireAuth } = require('./middlewareauth');
 const authRoutes = require('./routesauth');
+const googleSyncRoutes = require('./Calendar/routes.googleSync');
+const calendarEventsRouter = require('./Calendar/routes.calendarEvents');
 
 const router = express.Router();
 const app = express();
@@ -201,16 +203,9 @@ app.use("/api/review", userreviewsRouter);
 // ------------------------------------------------------------------------------------
 // ROUTES POUR LA GESTION DU CALENDRIER ET LA SYNCHRONISATION GOOGLE CALENDAR
 // ------------------------------------------------------------------------------------
-
-// Import des routes calendrier
-const calendarEventsRouter = require('./Calendar/routes.calendarEvents');
-const googleSyncRouter = require('./Calendar/routes.googleSync');
-
-// Utilisation des routes calendrier
+console.log("Configuration des routes du calendrier et Google Calendar...");
 app.use('/api/calendar', calendarEventsRouter);
-app.use('/api/google-sync', googleSyncRouter);
-
-// Log pour confirmation
+app.use('/api/google/sync', googleSyncRoutes);
 console.log("Routes du calendrier configurées");
 
 
@@ -866,34 +861,9 @@ app.get('/api/signed-url', requireAuth, async (req, res) => {
   }
 });
 
-// Middleware de logging pour le débogage des routes de calendrier
-app.use('/api/google', (req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  // Ajout d'en-têtes CORS spécifiques pour les routes de calendrier
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  next();
-});
-
-// Gestion des OPTIONS pour les routes de calendrier
-app.options('/api/google/*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(200);
-});
-
 // Ajout des routes de rendez-vous (prise de RDV)
 const appointmentRoutes = require('./Calendar/routes.appointment');
 app.use('/api/appointments', appointmentRoutes);
-
-
-
-// Route de compatibilité pour /api/google/auth
-app.use('/api/google', googleSyncRoutes);
 
 // ------------------------------------------------------------------------------------
 // Servir les fichiers statiques du calendrier depuis le dossier webflow
