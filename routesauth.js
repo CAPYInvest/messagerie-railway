@@ -4,14 +4,19 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 
+// Fonction pour configurer les en-têtes CORS
+function setCorsHeaders(req, res) {
+  const origin = req.headers.origin || 'https://capy-invest-fr.webflow.io';
+  res.header('Access-Control-Allow-Origin', origin);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+}
+
 // Route de test simple
 router.get('/test', (req, res) => {
   console.log('[Auth] Route de test appelée');
-  // Ajout d'en-têtes CORS spécifiques
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  setCorsHeaders(req, res);
   return res.json({ message: 'Le serveur fonctionne correctement!' });
 });
 
@@ -21,11 +26,7 @@ router.get('/login', async (req, res) => {
   console.log('[Auth] Headers:', JSON.stringify(req.headers, null, 2));
   console.log('[Auth] Query:', JSON.stringify(req.query, null, 2));
   
-  // Ajout d'en-têtes CORS spécifiques
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  setCorsHeaders(req, res);
   
   // Récupérer l'ID du membre depuis les paramètres de requête
   const memberId = req.query.memberId || req.query.id;
@@ -62,11 +63,7 @@ router.post('/login', async (req, res) => {
     console.log('[Auth] Headers:', JSON.stringify(req.headers, null, 2));
     console.log('[Auth] Body:', JSON.stringify(req.body, null, 2));
     
-    // Ajout d'en-têtes CORS spécifiques
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
-    res.header('Access-Control-Allow-Credentials', 'true');
+    setCorsHeaders(req, res);
     
     const memberData = req.body;
     if (!memberData) {
@@ -108,10 +105,7 @@ router.post('/login', async (req, res) => {
 
 // Gérer les requêtes OPTIONS pour le CORS
 router.options('/login', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  setCorsHeaders(req, res);
   res.sendStatus(200);
 });
 
