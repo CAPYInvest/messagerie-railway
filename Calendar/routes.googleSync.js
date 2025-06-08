@@ -9,13 +9,30 @@ const googleCalendarService = require('./googleCalendar');
 const { requireAuth } = require('../middlewareauth');
 const admin = require('firebase-admin');
 
-// État de synchronisation en mémoire
-let syncState = {
-    isSyncing: false,
-    progress: 0,
-    lastError: null,
-    googleTokens: null
-};
+// État de synchronisation en mémoire par utilisateur
+const userSyncStates = new Map();
+
+// Fonction pour obtenir ou créer l'état de synchronisation d'un utilisateur
+function getUserSyncState(userId) {
+    if (!userSyncStates.has(userId)) {
+        userSyncStates.set(userId, {
+            isSyncing: false,
+            progress: 0,
+            lastError: null,
+            googleTokens: null
+        });
+    }
+    return userSyncStates.get(userId);
+}
+
+// Fonction pour configurer les en-têtes CORS
+function setCorsHeaders(req, res) {
+  const origin = req.headers.origin || 'https://capy-invest-fr.webflow.io';
+  res.header('Access-Control-Allow-Origin', origin);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+}
 
 // Middleware temporaire pour le débogage
 const debugMiddleware = (req, res, next) => {
@@ -24,16 +41,34 @@ const debugMiddleware = (req, res, next) => {
     console.log('[Google Sync Debug] Body:', req.body);
     
     // Ajout d'en-têtes CORS
-    res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
+    setCorsHeaders(req, res);
     
     next();
 };
 
-// Appliquer le middleware de débogage à toutes les routes
+// Middleware pour extraire l'ID utilisateur du token JWT
+const extractUserIdMiddleware = (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.substring(7);
+            // Décodage du token sans vérification (juste pour obtenir l'ID)
+            const decoded = require('jsonwebtoken').decode(token);
+            if (decoded && decoded.uid) {
+                req.userId = decoded.uid;
+                console.log('[Google Sync] ID utilisateur extrait:', req.userId);
+            }
+        }
+        next();
+    } catch (error) {
+        console.error('[Google Sync] Erreur lors de l\'extraction de l\'ID utilisateur:', error);
+        next();
+    }
+};
+
+// Appliquer les middlewares
 router.use(debugMiddleware);
+router.use(extractUserIdMiddleware);
 
 /**
  * Route de callback pour l'authentification Google
@@ -44,6 +79,12 @@ router.post('/callback', async (req, res) => {
         console.log('[Google Sync] Headers:', req.headers);
         console.log('[Google Sync] Body:', req.body);
 
+        // Vérifier si l'ID utilisateur est disponible
+        if (!req.userId) {
+            console.error('[Google Sync] ID utilisateur manquant');
+            return res.status(401).json({ error: 'Authentification requise' });
+        }
+
         const { code } = req.body;
         if (!code) {
             console.error('[Google Sync] Code d\'autorisation manquant');
@@ -51,6 +92,7 @@ router.post('/callback', async (req, res) => {
         }
 
         console.log('[Google Sync] Code reçu:', code);
+        const syncState = getUserSyncState(req.userId);
 
         // Échange du code contre des tokens
         try {
@@ -63,10 +105,9 @@ router.post('/callback', async (req, res) => {
                 expiry_date: tokens.expiry_date
             });
 
-            // Stockage des tokens
+            // Stockage des tokens pour cet utilisateur
             syncState.googleTokens = tokens;
-            googleCalendarService.setCredentials(tokens);
-
+            
             // Démarrage de la synchronisation
             syncState.isSyncing = true;
             syncState.progress = 0;
@@ -96,7 +137,10 @@ router.post('/callback', async (req, res) => {
         }
     } catch (error) {
         console.error('[Google Sync] Erreur lors du callback:', error);
-        syncState.lastError = error.message;
+        if (req.userId) {
+            const syncState = getUserSyncState(req.userId);
+            syncState.lastError = error.message;
+        }
         res.status(500).json({ error: error.message });
     }
 });
@@ -106,8 +150,23 @@ router.post('/callback', async (req, res) => {
  */
 router.post('/sync', async (req, res) => {
     try {
+        // Vérifier si l'ID utilisateur est disponible
+        if (!req.userId) {
+            console.error('[Google Sync] ID utilisateur manquant');
+            return res.status(401).json({ error: 'Authentification requise' });
+        }
+
+        const syncState = getUserSyncState(req.userId);
+        
         if (syncState.isSyncing) {
-            return res.status(400).json({ error: 'Une synchronisation est déjà en cours' });
+            // Réinitialiser l'état si la synchronisation est bloquée depuis plus de 5 minutes
+            const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+            if (syncState.syncStartedAt && syncState.syncStartedAt < fiveMinutesAgo) {
+                console.log('[Google Sync] Réinitialisation d\'une synchronisation bloquée');
+                syncState.isSyncing = false;
+            } else {
+                return res.status(400).json({ error: 'Une synchronisation est déjà en cours' });
+            }
         }
 
         if (!syncState.googleTokens) {
@@ -116,20 +175,28 @@ router.post('/sync', async (req, res) => {
             return res.json({ authUrl });
         }
 
+        // Configurer les credentials pour cet utilisateur
+        googleCalendarService.setCredentials(syncState.googleTokens);
+
         syncState.isSyncing = true;
         syncState.progress = 0;
         syncState.lastError = null;
+        syncState.syncStartedAt = Date.now();
 
         // Simulation de la synchronisation
         setTimeout(() => {
             syncState.isSyncing = false;
             syncState.progress = 100;
+            delete syncState.syncStartedAt;
         }, 2000);
 
         res.json({ success: true, message: 'Synchronisation démarrée' });
     } catch (error) {
         console.error('[Google Sync] Erreur lors du démarrage de la synchronisation:', error);
-        syncState.lastError = error.message;
+        if (req.userId) {
+            const syncState = getUserSyncState(req.userId);
+            syncState.lastError = error.message;
+        }
         res.status(500).json({ error: error.message });
     }
 });
@@ -139,7 +206,16 @@ router.post('/sync', async (req, res) => {
  */
 router.get('/status', (req, res) => {
     console.log('[Google Sync] Vérification du statut de synchronisation');
-    console.log('[Google Sync] État actuel:', syncState);
+    
+    // Vérifier si l'ID utilisateur est disponible
+    if (!req.userId) {
+        console.error('[Google Sync] ID utilisateur manquant');
+        return res.status(401).json({ error: 'Authentification requise' });
+    }
+    
+    const syncState = getUserSyncState(req.userId);
+    console.log(`[Google Sync] État actuel pour l'utilisateur ${req.userId}:`, syncState);
+    
     res.json(syncState);
 });
 
@@ -160,10 +236,7 @@ router.post('/auth', async (req, res) => {
 
 // Gérer les requêtes OPTIONS
 router.options('*', (req, res) => {
-    res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
+    setCorsHeaders(req, res);
     res.sendStatus(200);
 });
 
