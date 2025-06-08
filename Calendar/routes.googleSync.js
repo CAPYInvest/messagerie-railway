@@ -19,7 +19,9 @@ function getUserSyncState(userId) {
             isSyncing: false,
             progress: 0,
             lastError: null,
-            googleTokens: null
+            googleTokens: null,
+            isConnected: false,
+            lastSync: null
         });
     }
     return userSyncStates.get(userId);
@@ -120,6 +122,7 @@ router.post('/callback', async (req, res) => {
 
                 // Stockage des tokens pour cet utilisateur
                 syncState.googleTokens = tokens;
+                syncState.isConnected = true;
                 
                 // Démarrage de la synchronisation
                 syncState.isSyncing = true;
@@ -130,6 +133,7 @@ router.post('/callback', async (req, res) => {
                 setTimeout(() => {
                     syncState.isSyncing = false;
                     syncState.progress = 100;
+                    syncState.lastSync = new Date().toISOString();
                 }, 2000);
 
                 return res.json({ success: true, message: 'Authentification réussie' });
@@ -178,6 +182,18 @@ router.post('/sync', async (req, res) => {
 
         const syncState = getUserSyncState(req.userId);
         
+        // Si le compte est déjà connecté et synchronisé, retourner un message spécifique
+        if (syncState.isConnected && syncState.lastSync && !syncState.isSyncing) {
+            const lastSyncDate = new Date(syncState.lastSync);
+            const formattedDate = lastSyncDate.toLocaleString('fr-FR');
+            return res.json({ 
+                success: true, 
+                alreadySynced: true,
+                message: `Votre compte Google Calendar est déjà connecté. Dernière synchronisation: ${formattedDate}`,
+                lastSync: syncState.lastSync
+            });
+        }
+        
         // Réinitialiser l'état si la synchronisation est bloquée depuis plus de 5 minutes
         if (syncState.isSyncing) {
             const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
@@ -209,6 +225,7 @@ router.post('/sync', async (req, res) => {
             setTimeout(() => {
                 syncState.isSyncing = false;
                 syncState.progress = 100;
+                syncState.lastSync = new Date().toISOString();
                 delete syncState.syncStartedAt;
             }, 2000);
 
@@ -219,6 +236,7 @@ router.post('/sync', async (req, res) => {
             // Si les tokens sont invalides, rediriger vers l'authentification
             console.log('[Google Sync] Tokens invalides, génération d\'une nouvelle URL d\'authentification');
             syncState.googleTokens = null;
+            syncState.isConnected = false;
             const authUrl = googleCalendarService.getAuthUrl();
             return res.json({ authUrl });
         }
@@ -249,6 +267,33 @@ router.get('/status', (req, res) => {
     console.log(`[Google Sync] État actuel pour l'utilisateur ${req.userId}:`, syncState);
     
     res.json(syncState);
+});
+
+/**
+ * Route pour déconnecter Google Calendar
+ */
+router.post('/disconnect', (req, res) => {
+    console.log('[Google Sync] Demande de déconnexion Google Calendar');
+    
+    // Vérifier si l'ID utilisateur est disponible
+    if (!req.userId) {
+        console.error('[Google Sync] ID utilisateur manquant');
+        return res.status(401).json({ error: 'Authentification requise' });
+    }
+    
+    const syncState = getUserSyncState(req.userId);
+    
+    // Réinitialiser l'état de synchronisation
+    syncState.googleTokens = null;
+    syncState.isConnected = false;
+    syncState.lastSync = null;
+    syncState.isSyncing = false;
+    syncState.progress = 0;
+    syncState.lastError = null;
+    
+    console.log(`[Google Sync] Compte Google Calendar déconnecté pour l'utilisateur ${req.userId}`);
+    
+    res.json({ success: true, message: 'Compte Google Calendar déconnecté avec succès' });
 });
 
 // Route pour l'authentification Google (pas besoin d'auth)
