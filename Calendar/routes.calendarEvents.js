@@ -6,11 +6,13 @@
 const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middlewareauth');
+// Utiliser l'instance Firebase Admin déjà initialisée dans server.js
 const admin = require('firebase-admin');
 const { google } = require('googleapis');
 const googleCalendarService = require('./googleCalendar');
 
 // Référence à la collection Firestore
+// Utiliser getFirestore() pour accéder à l'instance Firestore déjà initialisée
 const db = admin.firestore();
 const eventsCollection = db.collection('calendar_events');
 

@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const googleCalendarService = require('./googleCalendar');
 const { requireAuth } = require('../middlewareauth');
+// Utiliser l'instance Firebase Admin déjà initialisée dans server.js
 const admin = require('firebase-admin');
 
 // État de synchronisation en mémoire par utilisateur
