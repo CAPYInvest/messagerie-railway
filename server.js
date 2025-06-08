@@ -14,8 +14,6 @@ const bodyParser = require('body-parser');
 // Importez le middleware d'authentification depuis middlewareauth.js et routes
 const { requireAuth } = require('./middlewareauth');
 const authRoutes = require('./routesauth');
-const googleSyncRoutes = require('./Calendar/routes.googleSync');
-const calendarEventsRouter = require('./Calendar/routes.calendarEvents');
 
 const router = express.Router();
 const app = express();
@@ -69,10 +67,6 @@ const admin = require('firebase-admin');
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
-
-
-
-
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   storageBucket: "capy-invest.firebasestorage.app"
@@ -82,8 +76,11 @@ const bucket = admin.storage().bucket();
 // Utilisez l'Admin SDK pour Firestore
 const db = admin.firestore();
 
-
-
+// Après l'initialisation de Firebase Admin (ligne 66-74), ajouter:
+// Après cette ligne : const db = admin.firestore();
+// IMPORTANT: Importer les routes qui utilisent Firebase seulement APRÈS l'initialisation de Firebase
+const googleSyncRoutes = require('./Calendar/routes.googleSync');
+const calendarEventsRouter = require('./Calendar/routes.calendarEvents');
 
 //Import route token
 app.use('/api', authRoutes);
