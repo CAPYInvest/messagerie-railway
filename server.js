@@ -890,15 +890,17 @@ app.options('/api/google/*', (req, res) => {
 const appointmentRoutes = require('./Calendar/routes.appointment');
 app.use('/api/appointments', appointmentRoutes);
 
-// Ajout des routes de synchronisation Google
-const googleSyncRoutes = require('./Calendar/routes.googleSync');
-app.use('/api/google/sync', googleSyncRoutes);
+
 
 // Route de compatibilité pour /api/google/auth
 app.use('/api/google', googleSyncRoutes);
 
-// Route de compatibilité pour /api/calendar
-app.use('/api/calendar', require('./Calendar/routes.calendarEvents'));
+// ------------------------------------------------------------------------------------
+// Servir les fichiers statiques du calendrier depuis le dossier webflow
+// ------------------------------------------------------------------------------------
+app.use('/Calendar', express.static('webflow/Calendar'));
+app.use('/webflow', express.static('webflow'));
+console.log("Fichiers statiques configurés pour les dossiers /Calendar et /webflow");
 
 // 5) Lancement
 const PORT = process.env.PORT || 3000;
