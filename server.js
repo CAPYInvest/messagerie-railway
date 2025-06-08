@@ -25,31 +25,46 @@ const rateLimit  = require('express-rate-limit');
 
 // Configuration CORS plus permissive
 app.use(cors({
-  origin: '*', // Autorise toutes les origines
+  origin: function(origin, callback) {
+    // Autoriser les origines spécifiques ou le développement local
+    const allowedOrigins = ['https://capy-invest-fr.webflow.io', 'http://localhost:3000'];
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
   credentials: true,
-  preflightContinue: true
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 
 // Middleware de logging pour le débogage
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   // Ajout d'en-têtes CORS pour toutes les requêtes
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && ['https://capy-invest-fr.webflow.io', 'http://localhost:3000'].indexOf(origin) !== -1) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
   next();
 });
 
 // Middleware pour gérer les requêtes OPTIONS
 app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && ['https://capy-invest-fr.webflow.io', 'http://localhost:3000'].indexOf(origin) !== -1) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(200);
+  res.sendStatus(204);
 });
 
 // Configuration des middlewares de base
@@ -876,20 +891,26 @@ console.log("Fichiers statiques configurés pour les dossiers /Calendar et /webf
 app.use('/api/google', (req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   // Ajout d'en-têtes CORS spécifiques pour les routes de calendrier
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && ['https://capy-invest-fr.webflow.io', 'http://localhost:3000'].indexOf(origin) !== -1) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept');
   res.header('Access-Control-Allow-Credentials', 'true');
   next();
 });
 
 // Gestion des OPTIONS pour les routes de calendrier
 app.options('/api/google/*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && ['https://capy-invest-fr.webflow.io', 'http://localhost:3000'].indexOf(origin) !== -1) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept');
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.sendStatus(200);
+  res.sendStatus(204);
 });
 
 
