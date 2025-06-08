@@ -108,9 +108,7 @@ function simulateProgress(userId) {
 router.post('/callback', async (req, res) => {
     try {
         console.log('[Google Sync] Réception du callback Google');
-        console.log('[Google Sync] Headers:', req.headers);
-        console.log('[Google Sync] Body:', req.body);
-
+        
         // Vérifier si l'ID utilisateur est disponible
         if (!req.userId) {
             console.error('[Google Sync] ID utilisateur manquant');
@@ -131,78 +129,58 @@ router.post('/callback', async (req, res) => {
         syncState.progress = 0;
         syncState.lastError = null;
 
-        // Échange du code contre des tokens avec mécanisme de réessai
-        let tokens = null;
-        let attempts = 0;
-        const maxAttempts = 2;
+        try {
+            console.log(`[Google Sync] Tentative d'échange du code`);
+            const tokens = await googleCalendarService.getTokens(code);
+            
+            console.log('[Google Sync] Tokens reçus avec succès');
 
-        while (attempts < maxAttempts && !tokens) {
-            try {
-                attempts++;
-                console.log(`[Google Sync] Tentative ${attempts}/${maxAttempts} d'échange du code`);
-                tokens = await googleCalendarService.getTokens(code);
-                
-                console.log('[Google Sync] Tokens reçus:', {
-                    access_token: tokens.access_token ? 'Présent' : 'Absent',
-                    refresh_token: tokens.refresh_token ? 'Présent' : 'Absent',
-                    scope: tokens.scope,
-                    token_type: tokens.token_type,
-                    expiry_date: tokens.expiry_date
-                });
+            // Stockage des tokens pour cet utilisateur
+            syncState.googleTokens = tokens;
+            syncState.isConnected = true;
+            
+            // Démarrer la simulation de progression
+            simulateProgress(req.userId);
 
-                // Stockage des tokens pour cet utilisateur
-                syncState.googleTokens = tokens;
-                syncState.isConnected = true;
+            return res.json({ success: true, message: 'Authentification réussie' });
+        } catch (error) {
+            console.error(`[Google Sync] Erreur lors de l'échange du code:`, error.message);
+            
+            // Si l'erreur est "invalid_grant", retourner un message d'erreur convivial
+            if (error.message && error.message.includes('invalid_grant')) {
+                console.log('[Google Sync] Code expiré ou déjà utilisé');
                 
-                // Démarrer la simulation de progression
-                simulateProgress(req.userId);
-
-                return res.json({ success: true, message: 'Authentification réussie' });
-            } catch (error) {
-                console.error(`[Google Sync] Erreur lors de la tentative ${attempts}:`, error.message);
-                
-                // Si l'erreur est "invalid_grant", considérer que l'utilisateur est déjà connecté
-                if (error.message && error.message.includes('invalid_grant')) {
-                    console.log('[Google Sync] Code déjà utilisé, considérant que l\'utilisateur est déjà connecté');
-                    
-                    // Marquer l'utilisateur comme connecté même si nous n'avons pas les tokens
-                    syncState.isConnected = true;
-                    syncState.progress = 100;
-                    syncState.lastSync = new Date().toISOString();
-                    
+                // Vérifier si l'utilisateur est peut-être déjà connecté
+                // Cette vérification est approximative - dans un système de production,
+                // vous devriez stocker l'état de connexion dans la base de données
+                if (syncState.isConnected) {
                     return res.json({ 
                         success: true, 
                         alreadyConnected: true,
-                        message: 'Votre compte Google Calendar est déjà connecté.' 
+                        message: 'Votre compte Google Calendar semble déjà être connecté.' 
                     });
                 }
                 
-                if (attempts >= maxAttempts || error.message.includes('expiré')) {
-                    throw error;
-                }
-                
-                // Attendre un peu avant de réessayer
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                return res.status(400).json({ 
+                    error: 'Code d\'autorisation expiré ou déjà utilisé', 
+                    message: 'Veuillez réessayer la synchronisation en cliquant à nouveau sur le bouton de connexion Google Calendar.',
+                    needsReauthorization: true
+                });
             }
-        }
-
-        // Si on arrive ici, c'est qu'on a épuisé toutes les tentatives
-        throw new Error("Échec de l'authentification après plusieurs tentatives");
-    } catch (error) {
-        console.error('[Google Sync] Erreur lors du callback:', error);
-        if (req.userId) {
-            const syncState = getUserSyncState(req.userId);
+            
+            // Pour les autres erreurs
             syncState.lastError = error.message;
-            syncState.isSyncing = false;
+            return res.status(500).json({ 
+                error: 'Erreur lors de la synchronisation', 
+                message: 'Une erreur s\'est produite lors de la connexion à Google Calendar. Veuillez réessayer.' 
+            });
         }
-        
-        // Message d'erreur plus convivial
-        let errorMessage = error.message;
-        if (error.message.includes('invalid_grant') || error.message.includes('expiré') || error.message.includes('déjà été utilisé')) {
-            errorMessage = 'Le code d\'autorisation a expiré. Veuillez réessayer la synchronisation.';
-        }
-        
-        res.status(400).json({ error: errorMessage });
+    } catch (error) {
+        console.error('[Google Sync] Erreur générale lors du callback:', error);
+        return res.status(500).json({ 
+            error: 'Erreur serveur', 
+            message: 'Une erreur interne s\'est produite. Veuillez réessayer ultérieurement.' 
+        });
     }
 });
 
@@ -280,21 +258,37 @@ router.post('/sync', async (req, res) => {
 });
 
 /**
- * Route pour vérifier le statut de la synchronisation
+ * Route pour vérifier le statut de synchronisation
+ * GET /api/google/sync/status
  */
-router.get('/status', (req, res) => {
-    console.log('[Google Sync] Vérification du statut de synchronisation');
-    
-    // Vérifier si l'ID utilisateur est disponible
-    if (!req.userId) {
-        console.error('[Google Sync] ID utilisateur manquant');
-        return res.status(401).json({ error: 'Authentification requise' });
+router.get('/status', requireAuth, async (req, res) => {
+    try {
+        if (!req.userId) {
+            return res.status(401).json({ error: 'Authentification requise' });
+        }
+
+        // Récupérer l'état de synchronisation de l'utilisateur
+        const syncState = getUserSyncState(req.userId);
+        
+        // Générer l'URL d'authentification si l'utilisateur n'est pas connecté
+        let authUrl = null;
+        if (!syncState.isConnected) {
+            authUrl = googleCalendarService.getAuthUrl();
+        }
+
+        // Retourner l'état actuel
+        res.json({
+            isConnected: syncState.isConnected,
+            isSyncing: syncState.isSyncing,
+            progress: syncState.progress,
+            lastSync: syncState.lastSync,
+            lastError: syncState.lastError,
+            authUrl: authUrl
+        });
+    } catch (error) {
+        console.error('[Google Sync] Erreur lors de la vérification du statut:', error);
+        res.status(500).json({ error: 'Erreur lors de la vérification du statut' });
     }
-    
-    const syncState = getUserSyncState(req.userId);
-    console.log(`[Google Sync] État actuel pour l'utilisateur ${req.userId}:`, syncState);
-    
-    res.json(syncState);
 });
 
 /**
@@ -324,18 +318,24 @@ router.post('/disconnect', (req, res) => {
     res.json({ success: true, message: 'Compte Google Calendar déconnecté avec succès' });
 });
 
-// Route pour l'authentification Google (pas besoin d'auth)
-router.post('/auth', async (req, res) => {
+/**
+ * Route pour obtenir l'URL d'authentification Google
+ * GET /api/google/sync/auth
+ */
+router.get('/auth', requireAuth, (req, res) => {
     try {
-        console.log('[Google Sync] Demande d\'authentification');
-        
+        if (!req.userId) {
+            return res.status(401).json({ error: 'Authentification requise' });
+        }
+
+        // Générer l'URL d'authentification Google
         const authUrl = googleCalendarService.getAuthUrl();
-        console.log('[Google Sync] URL d\'authentification générée:', authUrl);
         
-        res.json({ requiresAuth: true, authUrl });
+        // Rediriger l'utilisateur vers l'URL d'authentification
+        res.redirect(authUrl);
     } catch (error) {
         console.error('[Google Sync] Erreur lors de la génération de l\'URL d\'authentification:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Erreur lors de la génération de l\'URL d\'authentification' });
     }
 });
 
