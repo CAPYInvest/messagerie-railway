@@ -8,9 +8,9 @@ const jwt = require('jsonwebtoken');
 router.get('/test', (req, res) => {
   console.log('[Auth] Route de test appelée');
   // Ajout d'en-têtes CORS spécifiques
-  res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+  res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
   return res.json({ message: 'Le serveur fonctionne correctement!' });
 });
@@ -23,9 +23,9 @@ router.post('/login', async (req, res) => {
     console.log('[Auth] Body:', JSON.stringify(req.body, null, 2));
     
     // Ajout d'en-têtes CORS spécifiques
-    res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+    res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
     res.header('Access-Control-Allow-Credentials', 'true');
     
     const memberData = req.body;
@@ -68,9 +68,9 @@ router.post('/login', async (req, res) => {
 
 // Gérer les requêtes OPTIONS pour le CORS
 router.options('/login', (req, res) => {
-  res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+  res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.sendStatus(200);
 });

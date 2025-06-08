@@ -855,18 +855,18 @@ app.get('/api/signed-url', requireAuth, async (req, res) => {
 app.use('/api/google', (req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   // Ajout d'en-têtes CORS spécifiques pour les routes de calendrier
-  res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+  res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
   next();
 });
 
 // Gestion des OPTIONS pour les routes de calendrier
 app.options('/api/google/*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', 'https://capy-invest-fr.webflow.io');
+  res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.sendStatus(200);
 });
