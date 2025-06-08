@@ -891,9 +891,6 @@ app.options('/api/google/*', (req, res) => {
   res.header('Access-Control-Allow-Credentials', 'true');
   res.sendStatus(200);
 });
-Add comment
-
-
 
 
 
