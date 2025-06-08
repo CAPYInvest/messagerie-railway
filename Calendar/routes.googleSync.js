@@ -21,25 +21,33 @@ router.get('/status', (req, res) => {
 // Route pour gérer le callback de Google OAuth
 router.post('/callback', requireAuth, async (req, res) => {
     try {
-        console.log('[Google Sync] Réception du callback Google avec code:', req.body.code);
+        console.log('[Google Sync] Réception du callback Google');
+        console.log('[Google Sync] Headers:', req.headers);
+        console.log('[Google Sync] Body:', req.body);
         
         // Récupérer le code d'autorisation
         const { code } = req.body;
         if (!code) {
+            console.error('[Google Sync] Code d\'autorisation manquant dans la requête');
             throw new Error('Code d\'autorisation manquant');
         }
 
+        console.log('[Google Sync] Code reçu:', code);
+
         // Échanger le code contre des tokens
+        console.log('[Google Sync] Tentative d\'échange du code contre des tokens');
         const tokens = await googleCalendar.getTokens(code);
-        console.log('[Google Sync] Tokens reçus:', tokens);
+        console.log('[Google Sync] Tokens reçus avec succès');
 
         // Stocker les tokens dans l'état de synchronisation
         syncState.googleTokens = tokens;
         syncState.hasTokens = true;
+        console.log('[Google Sync] Tokens stockés dans l\'état de synchronisation');
 
         res.json({ success: true, message: 'Authentification réussie' });
     } catch (error) {
         console.error('[Google Sync] Erreur lors du callback:', error);
+        console.error('[Google Sync] Stack trace:', error.stack);
         res.status(500).json({ error: error.message });
     }
 });

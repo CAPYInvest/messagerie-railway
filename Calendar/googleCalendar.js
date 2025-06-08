@@ -16,31 +16,62 @@ const oauth2Client = new google.auth.OAuth2(
 class GoogleCalendarService {
   constructor() {
     this.oauth2Client = oauth2Client;
+    console.log('[Google Calendar] Service initialisé avec:', {
+      clientId: googleConfig.clientId ? 'Défini' : 'Non défini',
+      clientSecret: googleConfig.clientSecret ? 'Défini' : 'Non défini',
+      redirectUri: googleConfig.redirectUri
+    });
   }
 
   /**
    * Génère l'URL d'autorisation OAuth2
    */
   getAuthUrl() {
-    return this.oauth2Client.generateAuthUrl({
+    const url = this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: googleConfig.scopes,
       prompt: 'consent'
     });
+    console.log('[Google Calendar] URL d\'authentification générée:', url);
+    return url;
   }
 
   /**
    * Échange le code d'autorisation contre des tokens
    */
   async getTokens(code) {
-    const { tokens } = await this.oauth2Client.getToken(code);
-    return tokens;
+    try {
+      console.log('[Google Calendar] Tentative d\'échange du code:', code);
+      console.log('[Google Calendar] Configuration OAuth2:', {
+        clientId: this.oauth2Client._clientId,
+        redirectUri: this.oauth2Client._redirectUri
+      });
+
+      const { tokens } = await this.oauth2Client.getToken(code);
+      console.log('[Google Calendar] Tokens reçus avec succès:', {
+        access_token: tokens.access_token ? 'Présent' : 'Absent',
+        refresh_token: tokens.refresh_token ? 'Présent' : 'Absent',
+        scope: tokens.scope,
+        token_type: tokens.token_type,
+        expiry_date: tokens.expiry_date
+      });
+      return tokens;
+    } catch (error) {
+      console.error('[Google Calendar] Erreur lors de l\'échange du code:', error);
+      console.error('[Google Calendar] Détails de l\'erreur:', {
+        message: error.message,
+        code: error.code,
+        errors: error.errors
+      });
+      throw error;
+    }
   }
 
   /**
-   * Configure le client avec les tokens
+   * Configure les credentials pour les requêtes API
    */
   setCredentials(tokens) {
+    console.log('[Google Calendar] Configuration des credentials');
     this.oauth2Client.setCredentials(tokens);
   }
 
