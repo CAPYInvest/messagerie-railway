@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const googleCalendar = require('./googleCalendar');
 const { requireAuth } = require('../middlewareauth');
+const admin = require('firebase-admin');
 
 // État de synchronisation global
 let syncState = {
@@ -17,6 +18,33 @@ router.get('/status', (req, res) => {
     res.json(syncState);
 });
 
+// Route pour gérer le callback de Google OAuth
+router.get('/callback', async (req, res) => {
+    try {
+        console.log('[Google Sync] Réception du callback Google avec code:', req.query.code);
+        
+        // Récupérer le code d'autorisation
+        const { code } = req.query;
+        if (!code) {
+            throw new Error('Code d\'autorisation manquant');
+        }
+
+        // Échanger le code contre des tokens
+        const tokens = await googleCalendar.getTokens(code);
+        console.log('[Google Sync] Tokens reçus:', tokens);
+
+        // TODO: Stocker les tokens dans votre base de données
+        // Pour l'instant, on les stocke en mémoire
+        syncState.googleTokens = tokens;
+
+        // Rediriger vers la page de succès
+        res.redirect('/compte-utilisateur?sync=success');
+    } catch (error) {
+        console.error('[Google Sync] Erreur lors du callback:', error);
+        res.redirect('/compte-utilisateur?sync=error&message=' + encodeURIComponent(error.message));
+    }
+});
+
 // Route pour démarrer la synchronisation (nécessite auth)
 router.post('/sync', requireAuth, async (req, res) => {
     try {
@@ -27,11 +55,21 @@ router.post('/sync', requireAuth, async (req, res) => {
             return res.status(409).json({ error: 'Une synchronisation est déjà en cours' });
         }
 
+        // Vérifier si nous avons des tokens Google
+        if (!syncState.googleTokens) {
+            console.log('[Google Sync] Pas de tokens Google, redirection vers l\'authentification');
+            return res.json({ requiresAuth: true, authUrl: googleCalendar.getAuthUrl() });
+        }
+
         syncState = {
             isSyncing: true,
             progress: 0,
-            lastError: null
+            lastError: null,
+            googleTokens: syncState.googleTokens
         };
+
+        // Configurer le client Google avec les tokens
+        googleCalendar.setCredentials(syncState.googleTokens);
 
         // Simulation de progression (à remplacer par la vraie logique)
         const progressInterval = setInterval(() => {
@@ -48,7 +86,8 @@ router.post('/sync', requireAuth, async (req, res) => {
         syncState = {
             isSyncing: false,
             progress: 100,
-            lastError: null
+            lastError: null,
+            googleTokens: syncState.googleTokens
         };
 
         console.log('[Google Sync] Synchronisation terminée avec succès');
@@ -59,7 +98,8 @@ router.post('/sync', requireAuth, async (req, res) => {
         syncState = {
             isSyncing: false,
             progress: 0,
-            lastError: error.message
+            lastError: error.message,
+            googleTokens: syncState.googleTokens
         };
         res.status(500).json({ error: error.message });
     }
