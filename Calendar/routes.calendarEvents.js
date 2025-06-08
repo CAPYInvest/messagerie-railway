@@ -433,12 +433,35 @@ router.post('/sync', requireAuth, async (req, res) => {
     // NOUVEAU: Importer les événements de Google Calendar
     try {
       console.log(`[Calendar Events] Importation des événements depuis Google Calendar pour l'utilisateur ${req.userId}`);
+      console.log(`[Calendar Events] État de la connexion:`, syncState);
+      
+      // Vérifier que l'utilisateur est bien connecté à Google Calendar
+      if (!syncState.isConnected || !syncState.googleTokens) {
+        console.error('[Calendar Events] Utilisateur non connecté à Google Calendar');
+        throw new Error('Non connecté à Google Calendar');
+      }
+      
+      // Si le token d'accès est potentiellement expiré, essayer de le rafraîchir
+      if (syncState.googleTokens.refresh_token) {
+        try {
+          console.log('[Calendar Events] Tentative de rafraîchissement préventif du token');
+          const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
+          syncState.googleTokens = {
+            ...newTokens,
+            refresh_token: syncState.googleTokens.refresh_token // Conserver le refresh_token
+          };
+          console.log('[Calendar Events] Token rafraîchi avec succès');
+        } catch (refreshError) {
+          console.error('[Calendar Events] Erreur lors du rafraîchissement du token:', refreshError);
+          // Continuer malgré l'erreur, on utilisera le token existant
+        }
+      } else {
+        console.log('[Calendar Events] Pas de refresh_token disponible, utilisation du token existant');
+      }
       
       // Configurer les credentials pour cet utilisateur
       googleCalendarService.setCredentials(syncState.googleTokens);
-      
-      // Récupérer les événements de Google Calendar
-      const calendar = google.calendar({ version: 'v3' });
+      console.log(`[Calendar Events] Credentials configurées`);
       
       // Définir la période pour les événements (3 mois avant et après aujourd'hui)
       const now = new Date();
@@ -447,16 +470,31 @@ router.post('/sync', requireAuth, async (req, res) => {
       const threeMonthsLater = new Date(now);
       threeMonthsLater.setMonth(now.getMonth() + 3);
       
-      const response = await calendar.events.list({
-        calendarId: 'primary',
-        timeMin: threeMonthsAgo.toISOString(),
-        timeMax: threeMonthsLater.toISOString(),
-        singleEvents: true,
-        orderBy: 'startTime'
-      });
+      console.log(`[Calendar Events] Récupération des événements Google Calendar entre ${threeMonthsAgo.toISOString()} et ${threeMonthsLater.toISOString()}`);
       
-      const googleEvents = response.data.items;
-      console.log(`[Calendar Events] ${googleEvents.length} événements récupérés depuis Google Calendar`);
+      // Utiliser directement la méthode listEvents du service Google Calendar
+      let googleEvents = [];
+      
+      try {
+        // Appel direct au service Google Calendar avec l'API Google Node.js
+        googleEvents = await googleCalendarService.listEvents(
+          'primary', 
+          threeMonthsAgo,
+          threeMonthsLater
+        );
+        
+        console.log(`[Calendar Events] ${googleEvents.length} événements récupérés depuis Google Calendar:`, 
+          googleEvents.map(e => ({
+            id: e.id,
+            summary: e.summary,
+            start: e.start?.dateTime || e.start?.date
+          }))
+        );
+      } catch (apiError) {
+        console.error('[Calendar Events] Erreur API Google Calendar:', apiError);
+        errors++;
+        // googleEvents reste un tableau vide
+      }
       
       // Récupérer tous les IDs d'événements Google déjà existants
       const existingGoogleIds = new Set();
@@ -472,16 +510,22 @@ router.post('/sync', requireAuth, async (req, res) => {
         }
       });
       
+      console.log(`[Calendar Events] ${existingGoogleIds.size} IDs Google existants dans Firestore:`, 
+        Array.from(existingGoogleIds)
+      );
+      
       // Traiter chaque événement Google
       const importPromises = googleEvents.map(async (googleEvent) => {
         try {
           // Vérifier si l'événement est déjà importé
           if (existingGoogleIds.has(googleEvent.id)) {
+            console.log(`[Calendar Events] Événement déjà importé, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
             return; // Événement déjà importé, ignorer
           }
           
           // Vérifier si l'événement a des dates valides
           if (!googleEvent.start || !googleEvent.end) {
+            console.log(`[Calendar Events] Événement sans dates, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
             return; // Ignorer les événements sans dates
           }
           
@@ -493,6 +537,7 @@ router.post('/sync', requireAuth, async (req, res) => {
           } else if (googleEvent.start.date) {
             startDate = new Date(googleEvent.start.date);
           } else {
+            console.log(`[Calendar Events] Format de date de début invalide, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
             return; // Ignorer si pas de date
           }
           
@@ -503,11 +548,13 @@ router.post('/sync', requireAuth, async (req, res) => {
             // Pour les événements d'une journée entière, la date de fin est exclusive
             endDate.setDate(endDate.getDate() - 1);
           } else {
+            console.log(`[Calendar Events] Format de date de fin invalide, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
             return; // Ignorer si pas de date
           }
           
           // Vérifier que le membre existe dans la base de données
           console.log(`[Calendar Events] Import - MemberId utilisé: ${req.userId}`);
+          console.log(`[Calendar Events] Création de l'événement: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
           
           // Créer l'événement dans Firestore avec le même memberId que l'utilisateur courant
           const eventData = {
@@ -524,7 +571,7 @@ router.post('/sync', requireAuth, async (req, res) => {
           
           // Enregistrer l'événement dans Firestore
           const docRef = await eventsCollection.add(eventData);
-          console.log(`[Calendar Events] Événement Google importé: ${docRef.id} pour utilisateur ${req.userId}`);
+          console.log(`[Calendar Events] Événement Google importé avec succès: ${docRef.id} pour utilisateur ${req.userId}`);
           created++;
         } catch (error) {
           console.error(`[Calendar Events] Erreur lors de l'importation d'un événement Google:`, error);

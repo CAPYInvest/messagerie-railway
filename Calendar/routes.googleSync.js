@@ -270,6 +270,32 @@ router.get('/status', requireAuth, async (req, res) => {
         // Récupérer l'état de synchronisation de l'utilisateur
         const syncState = getUserSyncState(req.userId);
         
+        // Si l'utilisateur est connecté mais que le token d'accès est expiré, essayer de le rafraîchir
+        if (syncState.isConnected && syncState.googleTokens) {
+            try {
+                const tokenInfo = await googleCalendarService.verifyToken(syncState.googleTokens.access_token);
+                console.log('[Google Sync] Token vérifié:', tokenInfo);
+            } catch (tokenError) {
+                console.log('[Google Sync] Le token d\'accès est peut-être expiré, tentative de rafraîchissement');
+                try {
+                    if (syncState.googleTokens.refresh_token) {
+                        const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
+                        syncState.googleTokens = { 
+                            ...newTokens, 
+                            refresh_token: syncState.googleTokens.refresh_token
+                        };
+                        console.log('[Google Sync] Token rafraîchi avec succès');
+                    } else {
+                        console.error('[Google Sync] Pas de refresh_token disponible');
+                        syncState.isConnected = false;
+                    }
+                } catch (refreshError) {
+                    console.error('[Google Sync] Erreur lors du rafraîchissement du token:', refreshError);
+                    syncState.isConnected = false;
+                }
+            }
+        }
+        
         // Générer l'URL d'authentification si l'utilisateur n'est pas connecté
         let authUrl = null;
         if (!syncState.isConnected) {

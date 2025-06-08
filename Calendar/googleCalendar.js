@@ -155,15 +155,41 @@ class GoogleCalendarService {
    * Récupère les événements d'une période donnée
    */
   async listEvents(calendarId, timeMin, timeMax) {
-    const calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
-    const response = await calendar.events.list({
-      calendarId,
-      timeMin: timeMin.toISOString(),
-      timeMax: timeMax.toISOString(),
-      singleEvents: true,
-      orderBy: 'startTime'
-    });
-    return response.data.items;
+    try {
+      console.log('[Google Calendar] Tentative de récupération des événements:', {
+        calendarId,
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
+        authStatus: this.oauth2Client.credentials ? 'Authentifié' : 'Non authentifié'
+      });
+      
+      // Vérifier que les credentials sont configurées
+      if (!this.oauth2Client.credentials || !this.oauth2Client.credentials.access_token) {
+        console.error('[Google Calendar] Credentials non configurées pour la récupération des événements');
+        throw new Error('Non authentifié à Google Calendar');
+      }
+      
+      const calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
+      const response = await calendar.events.list({
+        calendarId,
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
+        singleEvents: true,
+        orderBy: 'startTime'
+      });
+      
+      console.log(`[Google Calendar] ${response.data.items.length} événements récupérés`);
+      return response.data.items;
+    } catch (error) {
+      console.error('[Google Calendar] Erreur lors de la récupération des événements:', error);
+      console.error('[Google Calendar] Détails:', {
+        message: error.message,
+        code: error.code,
+        errors: error.errors,
+        credentials: this.oauth2Client.credentials ? 'Présentes' : 'Absentes'
+      });
+      throw error;
+    }
   }
 
   /**
@@ -172,6 +198,56 @@ class GoogleCalendarService {
   async isSlotAvailable(calendarId, startTime, endTime) {
     const events = await this.listEvents(calendarId, startTime, endTime);
     return events.length === 0;
+  }
+
+  /**
+   * Vérifie un token d'accès auprès de Google
+   */
+  async verifyToken(accessToken) {
+    try {
+      console.log('[Google Calendar] Vérification du token d\'accès');
+      const oauth2 = google.oauth2({
+        version: 'v2',
+        auth: this.oauth2Client
+      });
+      
+      // Utiliser la méthode tokeninfo pour vérifier le token
+      const response = await oauth2.tokeninfo({
+        access_token: accessToken
+      });
+      
+      return response.data;
+    } catch (error) {
+      console.error('[Google Calendar] Erreur lors de la vérification du token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Rafraîchit un token expiré
+   */
+  async refreshToken(refreshToken) {
+    try {
+      console.log('[Google Calendar] Tentative de rafraîchissement du token');
+      
+      // Configurer le refresh token
+      this.oauth2Client.setCredentials({
+        refresh_token: refreshToken
+      });
+      
+      // Demander un nouveau token d'accès
+      const { credentials } = await this.oauth2Client.refreshAccessToken();
+      
+      console.log('[Google Calendar] Token rafraîchi avec succès');
+      
+      // Mettre à jour les credentials
+      this.oauth2Client.setCredentials(credentials);
+      
+      return credentials;
+    } catch (error) {
+      console.error('[Google Calendar] Erreur lors du rafraîchissement du token:', error);
+      throw error;
+    }
   }
 }
 
