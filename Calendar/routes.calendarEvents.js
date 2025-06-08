@@ -433,68 +433,88 @@ router.post('/sync', requireAuth, async (req, res) => {
     // NOUVEAU: Importer les événements de Google Calendar
     try {
       console.log(`[Calendar Events] Importation des événements depuis Google Calendar pour l'utilisateur ${req.userId}`);
-      console.log(`[Calendar Events] État de la connexion:`, syncState);
       
-      // Vérifier que l'utilisateur est bien connecté à Google Calendar
-      if (!syncState.isConnected || !syncState.googleTokens) {
-        console.error('[Calendar Events] Utilisateur non connecté à Google Calendar');
-        throw new Error('Non connecté à Google Calendar');
-      }
-      
-      // Si le token d'accès est potentiellement expiré, essayer de le rafraîchir
-      if (syncState.googleTokens.refresh_token) {
-        try {
-          console.log('[Calendar Events] Tentative de rafraîchissement préventif du token');
-          const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
-          syncState.googleTokens = {
-            ...newTokens,
-            refresh_token: syncState.googleTokens.refresh_token // Conserver le refresh_token
-          };
-          console.log('[Calendar Events] Token rafraîchi avec succès');
-        } catch (refreshError) {
-          console.error('[Calendar Events] Erreur lors du rafraîchissement du token:', refreshError);
-          // Continuer malgré l'erreur, on utilisera le token existant
-        }
-      } else {
-        console.log('[Calendar Events] Pas de refresh_token disponible, utilisation du token existant');
+      // Vérifier si l'utilisateur a connecté Google Calendar
+      if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
+        return res.status(400).json({ 
+          error: 'Google Calendar n\'est pas connecté. Veuillez vous connecter d\'abord.' 
+        });
       }
       
       // Configurer les credentials pour cet utilisateur
       googleCalendarService.setCredentials(syncState.googleTokens);
-      console.log(`[Calendar Events] Credentials configurées`);
       
-      // Définir la période pour les événements (3 mois avant et après aujourd'hui)
+      // Récupérer les événements de Google Calendar
+      const calendar = google.calendar({ version: 'v3', auth: googleCalendarService.oauth2Client });
+      
+      // Définir une période plus large pour les événements (3 ans avant et après)
       const now = new Date();
-      const threeMonthsAgo = new Date(now);
-      threeMonthsAgo.setMonth(now.getMonth() - 3);
-      const threeMonthsLater = new Date(now);
-      threeMonthsLater.setMonth(now.getMonth() + 3);
+      const threeYearsAgo = new Date(now);
+      threeYearsAgo.setFullYear(now.getFullYear() - 1);
+      const threeYearsLater = new Date(now);
+      threeYearsLater.setFullYear(now.getFullYear() + 3); // Étendre à 3 ans dans le futur pour capturer les événements de 2025
       
-      console.log(`[Calendar Events] Récupération des événements Google Calendar entre ${threeMonthsAgo.toISOString()} et ${threeMonthsLater.toISOString()}`);
+      console.log(`[Calendar Events] Récupération des événements Google Calendar entre ${threeYearsAgo.toISOString()} et ${threeYearsLater.toISOString()}`);
       
-      // Utiliser directement la méthode listEvents du service Google Calendar
+      // Récupérer d'abord la liste des calendriers disponibles
+      const calListResponse = await calendar.calendarList.list();
+      const calendars = calListResponse.data.items || [];
+      console.log(`[Calendar Events] ${calendars.length} calendriers trouvés`);
+      
+      // Variable pour stocker les événements Google
       let googleEvents = [];
+      let calendarIdToUse = 'primary';
       
+      // Récupérer les événements du calendrier principal
       try {
-        // Appel direct au service Google Calendar avec l'API Google Node.js
-        googleEvents = await googleCalendarService.listEvents(
-          'primary', 
-          threeMonthsAgo,
-          threeMonthsLater
-        );
+        const response = await calendar.events.list({
+          calendarId: calendarIdToUse,
+          timeMin: threeYearsAgo.toISOString(),
+          timeMax: threeYearsLater.toISOString(),
+          singleEvents: true,
+          orderBy: 'startTime',
+          maxResults: 2500 // Augmenter pour récupérer plus d'événements
+        });
         
-        console.log(`[Calendar Events] ${googleEvents.length} événements récupérés depuis Google Calendar:`, 
-          googleEvents.map(e => ({
-            id: e.id,
-            summary: e.summary,
-            start: e.start?.dateTime || e.start?.date
-          }))
-        );
+        googleEvents = response.data.items || [];
+        console.log(`[Calendar Events] ${googleEvents.length} événements récupérés depuis le calendrier principal`);
+        
+        // Si aucun événement trouvé dans le calendrier principal, essayer les autres calendriers
+        if (googleEvents.length === 0 && calendars.length > 1) {
+          console.log(`[Calendar Events] Aucun événement trouvé dans le calendrier principal, essai avec d'autres calendriers`);
+          
+          for (const cal of calendars.filter(c => !c.primary).slice(0, 3)) {
+            try {
+              console.log(`[Calendar Events] Essai avec le calendrier: ${cal.summary} (${cal.id})`);
+              
+              const otherResponse = await calendar.events.list({
+                calendarId: cal.id,
+                timeMin: threeYearsAgo.toISOString(),
+                timeMax: threeYearsLater.toISOString(),
+                singleEvents: true,
+                orderBy: 'startTime',
+                maxResults: 100
+              });
+              
+              const calEvents = otherResponse.data.items || [];
+              console.log(`[Calendar Events] ${calEvents.length} événements trouvés dans le calendrier ${cal.summary}`);
+              
+              if (calEvents.length > 0) {
+                googleEvents = calEvents;
+                calendarIdToUse = cal.id;
+                break;
+              }
+            } catch (calError) {
+              console.error(`[Calendar Events] Erreur avec le calendrier ${cal.id}:`, calError.message);
+            }
+          }
+        }
       } catch (apiError) {
         console.error('[Calendar Events] Erreur API Google Calendar:', apiError);
         errors++;
-        // googleEvents reste un tableau vide
       }
+      
+      console.log(`[Calendar Events] Total de ${googleEvents.length} événements récupérés pour l'importation`);
       
       // Récupérer tous les IDs d'événements Google déjà existants
       const existingGoogleIds = new Set();
@@ -510,16 +530,23 @@ router.post('/sync', requireAuth, async (req, res) => {
         }
       });
       
-      console.log(`[Calendar Events] ${existingGoogleIds.size} IDs Google existants dans Firestore:`, 
-        Array.from(existingGoogleIds)
-      );
+      console.log(`[Calendar Events] ${existingGoogleIds.size} événements Google déjà importés`);
       
       // Traiter chaque événement Google
-      const importPromises = googleEvents.map(async (googleEvent) => {
+      console.log(`[Calendar Events] Début du traitement de ${googleEvents.length} événements Google Calendar`);
+      
+      let processedEvents = 0;
+      const importPromises = googleEvents.map(async (googleEvent, index) => {
         try {
+          processedEvents++;
+          // Log de progression tous les 5 événements
+          if (processedEvents % 5 === 0 || processedEvents === 1 || processedEvents === googleEvents.length) {
+            console.log(`[Calendar Events] Progression de l'import: ${processedEvents}/${googleEvents.length} événements traités`);
+          }
+          
           // Vérifier si l'événement est déjà importé
           if (existingGoogleIds.has(googleEvent.id)) {
-            console.log(`[Calendar Events] Événement déjà importé, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
+            console.log(`[Calendar Events] Événement ${index+1}/${googleEvents.length} déjà importé, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
             return; // Événement déjà importé, ignorer
           }
           
@@ -531,30 +558,60 @@ router.post('/sync', requireAuth, async (req, res) => {
           
           // Convertir les dates
           let startDate, endDate;
+          let isAllDay = false;
           
+          // Traitement des dates de début
           if (googleEvent.start.dateTime) {
+            // Événement avec heure précise
             startDate = new Date(googleEvent.start.dateTime);
+            console.log(`[Calendar Events] Date de début avec heure: ${startDate.toISOString()}`);
           } else if (googleEvent.start.date) {
+            // Événement sur la journée entière
             startDate = new Date(googleEvent.start.date);
+            isAllDay = true;
+            console.log(`[Calendar Events] Date de début journée entière: ${startDate.toISOString()}`);
           } else {
             console.log(`[Calendar Events] Format de date de début invalide, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
             return; // Ignorer si pas de date
           }
           
+          // Traitement des dates de fin
           if (googleEvent.end.dateTime) {
+            // Événement avec heure précise
             endDate = new Date(googleEvent.end.dateTime);
+            console.log(`[Calendar Events] Date de fin avec heure: ${endDate.toISOString()}`);
           } else if (googleEvent.end.date) {
+            // Événement sur la journée entière - ATTENTION: Dans Google Calendar,
+            // la date de fin pour les événements "all day" est exclusive (le jour après)
             endDate = new Date(googleEvent.end.date);
-            // Pour les événements d'une journée entière, la date de fin est exclusive
-            endDate.setDate(endDate.getDate() - 1);
+            
+            // Si c'est un événement toute la journée, la date de fin est exclusive
+            // Nous la reculons d'un jour pour qu'elle soit inclusive
+            if (isAllDay) {
+              endDate.setDate(endDate.getDate() - 1);
+              // Et nous la réglons à 23:59:59 pour couvrir toute la journée
+              endDate.setHours(23, 59, 59, 999);
+              console.log(`[Calendar Events] Date de fin journée entière ajustée: ${endDate.toISOString()}`);
+            }
           } else {
             console.log(`[Calendar Events] Format de date de fin invalide, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
             return; // Ignorer si pas de date
           }
           
+          // Si c'est un événement toute la journée, s'assurer que la date de début est à 00:00:00
+          if (isAllDay) {
+            startDate.setHours(0, 0, 0, 0);
+          }
+          
+          // Vérifier que les dates sont valides
+          if (endDate < startDate) {
+            console.log(`[Calendar Events] Date de fin avant la date de début, ignoré: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
+            return; // Ignorer les événements avec des dates invalides
+          }
+          
           // Vérifier que le membre existe dans la base de données
           console.log(`[Calendar Events] Import - MemberId utilisé: ${req.userId}`);
-          console.log(`[Calendar Events] Création de l'événement: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'}`);
+          console.log(`[Calendar Events] Création de l'événement: ${googleEvent.id} - ${googleEvent.summary || 'Sans titre'} - Dates: ${startDate.toISOString()} à ${endDate.toISOString()}`);
           
           // Créer l'événement dans Firestore avec le même memberId que l'utilisateur courant
           const eventData = {
@@ -579,6 +636,7 @@ router.post('/sync', requireAuth, async (req, res) => {
         }
       });
       
+      // Attendre que toutes les importations soient terminées
       await Promise.all(importPromises);
       console.log(`[Calendar Events] Importation terminée: ${created} événements importés`);
     } catch (googleError) {
