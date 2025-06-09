@@ -193,7 +193,7 @@ router.post('/events', requireAuth, async (req, res) => {
     };
 
     // Vérifier si l'utilisateur a connecté Google Calendar
-    const syncState = getUserSyncState(req.userId);
+    const syncState = await getUserSyncState(req.userId);
     
     if (syncState && syncState.isConnected && syncState.googleTokens) {
       try {
@@ -383,7 +383,7 @@ router.post('/sync', requireAuth, async (req, res) => {
     }
 
     // Vérifier si l'utilisateur a connecté Google Calendar
-    const syncState = getUserSyncState(req.userId);
+    const syncState = await getUserSyncState(req.userId);
     
     if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
       return res.status(400).json({ 
@@ -812,7 +812,7 @@ router.post('/sync', requireAuth, async (req, res) => {
  * @returns {Promise<Object>} - Événement Google Calendar créé
  */
 async function createGoogleCalendarEvent(userId, eventData) {
-  const syncState = getUserSyncState(userId);
+  const syncState = await getUserSyncState(userId);
   
   if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
     throw new Error('Google Calendar n\'est pas connecté');
@@ -962,7 +962,7 @@ async function createGoogleCalendarEvent(userId, eventData) {
  * @returns {Promise<Object>} - Événement Google Calendar mis à jour
  */
 async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
-  const syncState = getUserSyncState(userId);
+  const syncState = await getUserSyncState(userId);
   
   if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
     throw new Error('Google Calendar n\'est pas connecté');
@@ -1115,7 +1115,7 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
  * @returns {Promise<void>}
  */
 async function deleteGoogleCalendarEvent(userId, googleEventId) {
-  const syncState = getUserSyncState(userId);
+  const syncState = await getUserSyncState(userId);
   
   if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
     throw new Error('Google Calendar n\'est pas connecté');
@@ -1135,12 +1135,12 @@ async function deleteGoogleCalendarEvent(userId, googleEventId) {
 /**
  * Récupère l'état de synchronisation d'un utilisateur
  * @param {string} userId - ID de l'utilisateur
- * @returns {Object|null} - État de synchronisation
+ * @returns {Promise<Object|null>} - État de synchronisation
  */
-function getUserSyncState(userId) {
+async function getUserSyncState(userId) {
   // Réutiliser la fonction existante du module routes.googleSync
   if (typeof require('./routes.googleSync').getUserSyncState === 'function') {
-    return require('./routes.googleSync').getUserSyncState(userId);
+    return await require('./routes.googleSync').getUserSyncState(userId);
   }
   
   // Fallback si la fonction n'est pas disponible

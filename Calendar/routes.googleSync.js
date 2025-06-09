@@ -87,6 +87,12 @@ async function saveSyncStateToFirestore(userId) {
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         };
         
+        console.log(`[Google Sync] Sauvegarde de l'état dans Firestore pour l'utilisateur ${userId}:`, {
+            isConnected: stateToSave.isConnected,
+            hasTokens: stateToSave.googleTokens ? 'Oui' : 'Non',
+            lastSync: stateToSave.lastSync
+        });
+        
         await syncStatesCollection.doc(userId).set(stateToSave, { merge: true });
         console.log(`[Google Sync] État de synchronisation sauvegardé dans Firestore pour l'utilisateur ${userId}`);
     } catch (error) {
@@ -188,7 +194,7 @@ router.post('/callback', async (req, res) => {
         }
 
         console.log('[Google Sync] Code reçu:', code);
-        const syncState = getUserSyncState(req.userId);
+        const syncState = await getUserSyncState(req.userId);
 
         // Réinitialiser l'état de synchronisation
         syncState.isSyncing = false;
@@ -264,7 +270,7 @@ router.post('/sync', async (req, res) => {
             return res.status(401).json({ error: 'Authentification requise' });
         }
 
-        const syncState = getUserSyncState(req.userId);
+        const syncState = await getUserSyncState(req.userId);
         
         // Si le compte est déjà connecté et synchronisé, retourner un message spécifique
         if (syncState.isConnected && syncState.lastSync && !syncState.isSyncing) {
@@ -312,15 +318,20 @@ router.post('/sync', async (req, res) => {
             console.log('[Google Sync] Tokens invalides, génération d\'une nouvelle URL d\'authentification');
             syncState.googleTokens = null;
             syncState.isConnected = false;
+            
+            // Sauvegarder l'état mis à jour dans Firestore
+            await saveSyncStateToFirestore(req.userId);
+            
             const authUrl = googleCalendarService.getAuthUrl();
             return res.json({ authUrl });
         }
     } catch (error) {
         console.error('[Google Sync] Erreur lors du démarrage de la synchronisation:', error);
         if (req.userId) {
-            const syncState = getUserSyncState(req.userId);
+            const syncState = await getUserSyncState(req.userId);
             syncState.lastError = error.message;
             syncState.isSyncing = false;
+            await saveSyncStateToFirestore(req.userId);
         }
         res.status(500).json({ error: error.message });
     }
@@ -337,7 +348,7 @@ router.get('/status', requireAuth, async (req, res) => {
         }
 
         // Récupérer l'état de synchronisation de l'utilisateur
-        const syncState = getUserSyncState(req.userId);
+        const syncState = await getUserSyncState(req.userId);
         
         // Si l'utilisateur est connecté mais que le token d'accès est expiré, essayer de le rafraîchir
         if (syncState.isConnected && syncState.googleTokens) {
@@ -354,13 +365,18 @@ router.get('/status', requireAuth, async (req, res) => {
                             refresh_token: syncState.googleTokens.refresh_token
                         };
                         console.log('[Google Sync] Token rafraîchi avec succès');
+                        
+                        // Sauvegarder les nouveaux tokens dans Firestore
+                        await saveSyncStateToFirestore(req.userId);
                     } else {
                         console.error('[Google Sync] Pas de refresh_token disponible');
                         syncState.isConnected = false;
+                        await saveSyncStateToFirestore(req.userId);
                     }
                 } catch (refreshError) {
                     console.error('[Google Sync] Erreur lors du rafraîchissement du token:', refreshError);
                     syncState.isConnected = false;
+                    await saveSyncStateToFirestore(req.userId);
                 }
             }
         }
@@ -389,7 +405,7 @@ router.get('/status', requireAuth, async (req, res) => {
 /**
  * Route pour déconnecter Google Calendar
  */
-router.post('/disconnect', (req, res) => {
+router.post('/disconnect', async (req, res) => {
     console.log('[Google Sync] Demande de déconnexion Google Calendar');
     
     // Vérifier si l'ID utilisateur est disponible
@@ -398,7 +414,7 @@ router.post('/disconnect', (req, res) => {
         return res.status(401).json({ error: 'Authentification requise' });
     }
     
-    const syncState = getUserSyncState(req.userId);
+    const syncState = await getUserSyncState(req.userId);
     
     // Réinitialiser l'état de synchronisation
     syncState.googleTokens = null;
@@ -407,6 +423,9 @@ router.post('/disconnect', (req, res) => {
     syncState.isSyncing = false;
     syncState.progress = 0;
     syncState.lastError = null;
+    
+    // Sauvegarder l'état mis à jour dans Firestore
+    await saveSyncStateToFirestore(req.userId);
     
     console.log(`[Google Sync] Compte Google Calendar déconnecté pour l'utilisateur ${req.userId}`);
     
