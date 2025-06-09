@@ -275,18 +275,18 @@ router.post('/calendar', requireAuth, async (req, res) => {
             
             // Créer un objet de réponse simulé pour capturer la réponse
             const mockResponse = {
-                status: 200,
+                statusCode: 200,
                 statusText: 'OK',
                 headers: {},
                 _body: null,
-                json: function() { return this._body; },
                 status: function(code) { this.statusCode = code; return this; },
                 json: function(data) { this._body = data; return this; }
             };
             
             // Appeler directement la fonction qui gère /api/calendar/sync
-            // Pour ce faire, nous devons l'importer
-            const { syncCalendarRoute } = require('./routes.calendarEvents');
+            // Pour ce faire, nous devons l'importer correctement
+            const calendarRoutes = require('./routes.calendarEvents');
+            const { syncCalendarRoute } = calendarRoutes;
             
             if (!syncCalendarRoute || typeof syncCalendarRoute !== 'function') {
                 throw new Error('La route de synchronisation n\'est pas disponible');

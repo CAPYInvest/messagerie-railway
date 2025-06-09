@@ -1005,7 +1005,8 @@ router.options('*', (req, res) => {
   res.sendStatus(200);
 });
 
-// Exporter la fonction de synchronisation
-module.exports.syncCalendarRoute = syncCalendarRoute;
-
-module.exports = router; 
+// Exporter à la fois le routeur et la fonction de synchronisation
+module.exports = {
+  router,
+  syncCalendarRoute
+}; 
