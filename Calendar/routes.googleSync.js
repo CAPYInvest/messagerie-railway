@@ -269,50 +269,40 @@ router.post('/calendar', requireAuth, async (req, res) => {
             });
         }
 
-        // Faire la requête à /api/calendar/sync
+        // Importer directement la route de synchronisation plutôt que de faire un fetch
         try {
-            // Appeler la route /api/calendar/sync avec les credentials Google
-            const response = await fetch(`${req.protocol}://${req.get('host')}/api/calendar/sync`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': req.headers.authorization
-                }
-            });
-
-            // D'abord récupérer le contenu en texte pour éviter les erreurs de parsing JSON
-            const responseText = await response.text();
+            console.log('[Google Sync] Appel direct à la fonction de synchronisation');
             
-            if (!response.ok) {
-                let errorMessage = `Erreur HTTP: ${response.status}`;
-                try {
-                    // Essayer de parser le JSON seulement si c'est possible
-                    const errorData = JSON.parse(responseText);
-                    if (errorData && errorData.error) {
-                        errorMessage = errorData.error;
-                    }
-                } catch (parseError) {
-                    console.error('[Google Sync] Erreur lors du parsing JSON de la réponse d\'erreur:', parseError);
-                    console.error('[Google Sync] Réponse reçue:', responseText);
-                    // Utiliser un texte d'erreur générique si la réponse est trop longue (probablement du HTML)
-                    if (responseText && responseText.length > 100) {
-                        errorMessage = 'Erreur serveur (réponse non-JSON)';
-                    } else if (responseText) {
-                        errorMessage = responseText;
-                    }
-                }
-                
-                throw new Error(errorMessage);
+            // Créer un objet de réponse simulé pour capturer la réponse
+            const mockResponse = {
+                status: 200,
+                statusText: 'OK',
+                headers: {},
+                _body: null,
+                json: function() { return this._body; },
+                status: function(code) { this.statusCode = code; return this; },
+                json: function(data) { this._body = data; return this; }
+            };
+            
+            // Appeler directement la fonction qui gère /api/calendar/sync
+            // Pour ce faire, nous devons l'importer
+            const { syncCalendarRoute } = require('./routes.calendarEvents');
+            
+            if (!syncCalendarRoute || typeof syncCalendarRoute !== 'function') {
+                throw new Error('La route de synchronisation n\'est pas disponible');
             }
-
-            let result;
-            try {
-                result = JSON.parse(responseText);
-            } catch (parseError) {
-                console.error('[Google Sync] Erreur lors du parsing JSON de la réponse:', parseError);
-                console.error('[Google Sync] Réponse reçue:', responseText.substring(0, 200) + '...');
-                throw new Error('Réponse serveur invalide (non-JSON)');
+            
+            // Exécuter la fonction de synchronisation
+            await syncCalendarRoute(req, mockResponse);
+            
+            // Vérifier si une erreur s'est produite
+            if (mockResponse.statusCode && mockResponse.statusCode !== 200) {
+                throw new Error(mockResponse._body && mockResponse._body.error 
+                    ? mockResponse._body.error 
+                    : `Erreur HTTP: ${mockResponse.statusCode}`);
             }
+            
+            const result = mockResponse._body;
 
             // Mettre à jour l'état de synchronisation
             syncState.lastSync = new Date().toISOString();

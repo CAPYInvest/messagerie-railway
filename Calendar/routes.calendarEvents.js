@@ -10,7 +10,8 @@ const { requireAuth } = require('../middlewareauth');
 const admin = require('firebase-admin');
 const { google } = require('googleapis');
 const googleCalendarService = require('./googleCalendar');
-const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
+// Ne pas importer getUserSyncState et saveSyncStateToFirestore directement pour éviter une dépendance circulaire
+// const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
 
 // Référence à la collection Firestore
 // Utiliser getFirestore() pour accéder à l'instance Firestore déjà initialisée
@@ -357,13 +358,23 @@ router.delete('/events/:id', requireAuth, async (req, res) => {
  * Synchronise tous les événements d'un utilisateur avec Google Calendar
  * POST /api/calendar/sync
  */
-router.post('/sync', requireAuth, async (req, res) => {
+router.post('/sync', requireAuth, syncCalendarRoute);
+
+/**
+ * Fonction de synchronisation du calendrier avec Google Calendar
+ * @param {Object} req - Requête Express
+ * @param {Object} res - Réponse Express
+ */
+async function syncCalendarRoute(req, res) {
   try {
     // Vérifier si l'utilisateur est authentifié
     if (!req.userId) {
       return res.status(401).json({ error: 'Authentification requise' });
     }
 
+    // Import dynamique pour éviter la dépendance circulaire
+    const { getUserSyncState } = require('./routes.googleSync');
+    
     // Vérifier si l'utilisateur a connecté Google Calendar
     const syncState = await getUserSyncState(req.userId);
     
@@ -456,6 +467,9 @@ router.post('/sync', requireAuth, async (req, res) => {
             ...newTokens,
             refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
           };
+          
+          // Import dynamique pour éviter la dépendance circulaire
+          const { saveSyncStateToFirestore } = require('./routes.googleSync');
           
           // Mettre à jour les tokens dans la base de données
           await saveSyncStateToFirestore(req.userId);
@@ -743,8 +757,8 @@ router.post('/sync', requireAuth, async (req, res) => {
       // Attendre que toutes les importations soient terminées
       await Promise.all(importPromises);
       console.log(`[Calendar Events] Importation terminée: ${created} événements importés`);
-    } catch (googleError) {
-      console.error("[Calendar Events] Erreur lors de l'importation depuis Google Calendar:", googleError);
+    } catch (importError) {
+      console.error(`[Calendar Events] Erreur lors de l'importation depuis Google Calendar:`, importError);
       errors++;
     }
 
@@ -775,7 +789,7 @@ router.post('/sync', requireAuth, async (req, res) => {
     console.error('[Calendar Events] Erreur lors de la synchronisation avec Google Calendar:', error);
     res.status(500).json({ error: 'Erreur lors de la synchronisation avec Google Calendar' });
   }
-});
+}
 
 /**
  * Crée un événement dans Google Calendar
@@ -784,6 +798,9 @@ router.post('/sync', requireAuth, async (req, res) => {
  * @returns {Promise<Object>} - Événement Google Calendar créé
  */
 async function createGoogleCalendarEvent(userId, eventData) {
+  // Import dynamique pour éviter la dépendance circulaire
+  const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
+  
   const syncState = await getUserSyncState(userId);
   
   if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
@@ -797,7 +814,7 @@ async function createGoogleCalendarEvent(userId, eventData) {
     // Rafraîchir le token si nécessaire
     if (syncState.googleTokens.refresh_token) {
       try {
-        console.log('[Calendar Events] Tentative de rafraîchissement du token avant création d\'événement');
+        console.log('[Calendar Events] Tentative de rafraîchissement préventif du token');
         const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
         
         // Mettre à jour les tokens dans la mémoire
@@ -807,7 +824,7 @@ async function createGoogleCalendarEvent(userId, eventData) {
         };
         
         // Mettre à jour les tokens dans la base de données
-        await saveSyncStateToFirestore(req.userId);
+        await saveSyncStateToFirestore(userId);
         
         console.log('[Calendar Events] Token rafraîchi avec succès');
         
@@ -921,6 +938,9 @@ async function createGoogleCalendarEvent(userId, eventData) {
  * @returns {Promise<Object>} - Événement Google Calendar mis à jour
  */
 async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
+  // Import dynamique pour éviter la dépendance circulaire
+  const { getUserSyncState } = require('./routes.googleSync');
+  
   const syncState = await getUserSyncState(userId);
   
   if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
@@ -959,6 +979,9 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
  * @returns {Promise<void>}
  */
 async function deleteGoogleCalendarEvent(userId, googleEventId) {
+  // Import dynamique pour éviter la dépendance circulaire
+  const { getUserSyncState } = require('./routes.googleSync');
+  
   const syncState = await getUserSyncState(userId);
   
   if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
@@ -981,5 +1004,8 @@ router.options('*', (req, res) => {
   setCorsHeaders(req, res);
   res.sendStatus(200);
 });
+
+// Exporter la fonction de synchronisation
+module.exports.syncCalendarRoute = syncCalendarRoute;
 
 module.exports = router; 
