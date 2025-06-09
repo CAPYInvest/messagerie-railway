@@ -913,53 +913,21 @@ router.post('/sync', requireAuth, async (req, res) => {
  * @returns {Promise<Object>} - Événement Google Calendar créé
  */
 async function createGoogleCalendarEvent(userId, eventData) {
-  const syncState = await getUserSyncState(userId);
-  
-  if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
-    throw new Error('Google Calendar n\'est pas connecté');
-  }
-  
   try {
-    // Configurer les credentials pour cet utilisateur
-    googleCalendarService.setCredentials(syncState.googleTokens);
-    
-    // Rafraîchir le token si nécessaire
-    if (syncState.googleTokens.refresh_token) {
-      try {
-        console.log('[Calendar Events] Tentative de rafraîchissement du token avant création d\'événement');
-        const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
-        
-        // Mettre à jour les tokens dans la mémoire
-        syncState.googleTokens = {
-          ...newTokens,
-          refresh_token: syncState.googleTokens.refresh_token
-        };
-        
-        // NOTE: Nous n'utilisons pas Firestore pour stocker les tokens, tout est en mémoire
-        // donc nous supprimons cette partie qui causait l'erreur
-        console.log('[Calendar Events] Token rafraîchi avec succès');
-        
-        // Reconfigurer les credentials avec les nouveaux tokens
-        googleCalendarService.setCredentials(syncState.googleTokens);
-      } catch (refreshError) {
-        console.error('[Calendar Events] Erreur lors du rafraîchissement du token:', refreshError);
-        // Continuer malgré l'erreur
-      }
+    const syncState = await getUserSyncState(userId);
+    if (!syncState || !syncState.isConnected) {
+      console.log('[Calendar Events] Utilisateur non connecté à Google Calendar');
+      return null;
     }
-    
-    // Créer l'événement
+
     const calendar = google.calendar({ version: 'v3', auth: googleCalendarService.oauth2Client });
     
     // Préparer les dates au format Google Calendar
     let start, end;
     
     if (eventData.allDay) {
-      // Pour les événements sur la journée entière, utiliser le format 'date'
       const startDate = new Date(eventData.start);
       const endDate = new Date(eventData.end);
-      
-      // Pour Google Calendar, les dates de fin sont exclusives pour les événements "all day"
-      // Il faut donc ajouter un jour à la date de fin
       endDate.setDate(endDate.getDate() + 1);
       
       start = {
@@ -969,7 +937,6 @@ async function createGoogleCalendarEvent(userId, eventData) {
         date: endDate.toISOString().split('T')[0]
       };
     } else {
-      // Pour les événements avec heure précise, utiliser le format 'dateTime'
       start = {
         dateTime: new Date(eventData.start).toISOString(),
         timeZone: 'Europe/Paris'
@@ -979,11 +946,10 @@ async function createGoogleCalendarEvent(userId, eventData) {
         timeZone: 'Europe/Paris'
       };
     }
-    
-    // Déterminer le colorId basé sur la couleur de l'événement
-    let colorId = null;
-    if (eventData.color) {
-      // Map des couleurs hexadécimales vers les colorId de Google Calendar
+
+    // Utiliser le colorId fourni ou le convertir depuis la couleur hexadécimale
+    let colorId = eventData.colorId;
+    if (!colorId && eventData.color) {
       const colorMap = {
         '#7986cb': '1', // Lavender
         '#33b679': '2', // Sage
@@ -997,60 +963,40 @@ async function createGoogleCalendarEvent(userId, eventData) {
         '#0b8043': '10', // Basil
         '#d60000': '11' // Tomato
       };
-      
-      // Trouver la couleur la plus proche
-      for (const [hex, id] of Object.entries(colorMap)) {
-        if (eventData.color.toLowerCase() === hex.toLowerCase()) {
-          colorId = id;
-          break;
-        }
-      }
+      colorId = colorMap[eventData.color] || '7';
     }
-    
-    // Préparer la description en fonction du type d'événement
-    let description = eventData.description || '';
-    if (eventData.type === 'task') {
-      description = '[TASK] ' + description;
-    }
-    
-    console.log(`[Calendar Events] Tentative de création d'événement Google Calendar:`, {
+
+    // Ne pas ajouter [TASK] si ce n'est pas une tâche
+    const description = eventData.type === 'task' 
+      ? `[TASK] ${eventData.description || ''}`
+      : eventData.description || '';
+
+    console.log('[Calendar Events] Création événement Google Calendar:', {
       summary: eventData.title,
-      start: eventData.allDay ? start.date : start.dateTime,
-      end: eventData.allDay ? end.date : end.dateTime,
-      colorId: colorId,
-      type: eventData.type || 'event'
+      description,
+      location: eventData.location,
+      start,
+      end,
+      colorId,
+      type: eventData.type
     });
-    
+
     const response = await calendar.events.insert({
       calendarId: 'primary',
       requestBody: {
         summary: eventData.title,
-        description: description,
+        description,
         location: eventData.location || '',
         start,
         end,
-        colorId,
+        colorId
       }
     });
-    
+
     console.log(`[Calendar Events] Événement Google Calendar créé avec succès: ${response.data.id}`);
     return response.data;
   } catch (error) {
     console.error('[Calendar Events] Erreur lors de la création de l\'événement Google Calendar:', error);
-    
-    // Si l'erreur est une erreur d'authentification (401), essayons de reconnecter l'utilisateur
-    if (error.code === 401 || (error.response && error.response.status === 401)) {
-      console.error('[Calendar Events] Erreur d\'authentification 401 - Token expiré ou invalide');
-      
-      // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
-      syncState.isConnected = false;
-      await syncStatesCollection.doc(userId).update({
-        isConnected: false,
-        googleConnectionStatus: 'Déconnecté - Token expiré',
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-    }
-    
     throw error;
   }
 }
