@@ -947,29 +947,79 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
     throw new Error('Google Calendar n\'est pas connecté');
   }
   
-  // Configurer les credentials pour cet utilisateur
-  googleCalendarService.setCredentials(syncState.googleTokens);
-  
-  // Mettre à jour l'événement
-  const calendar = google.calendar({ version: 'v3' });
-  const response = await calendar.events.update({
-    calendarId: 'primary',
-    eventId: googleEventId,
-    requestBody: {
-      summary: eventData.title,
-      description: eventData.description,
-      start: {
-        dateTime: eventData.start.toISOString(),
-        timeZone: 'Europe/Paris'
-      },
-      end: {
-        dateTime: eventData.end.toISOString(),
-        timeZone: 'Europe/Paris'
+  try {
+    // Configurer les credentials pour cet utilisateur
+    googleCalendarService.setCredentials(syncState.googleTokens);
+    
+    // Rafraîchir le token si nécessaire
+    if (syncState.googleTokens.refresh_token) {
+      try {
+        console.log('[Calendar Events] Tentative de rafraîchissement préventif du token pour mise à jour');
+        const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
+        
+        // Mettre à jour les tokens dans la mémoire
+        syncState.googleTokens = {
+          ...newTokens,
+          refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
+        };
+        
+        // Mettre à jour les tokens dans la base de données
+        await saveSyncStateToFirestore(userId);
+        
+        console.log('[Calendar Events] Token rafraîchi avec succès pour mise à jour');
+        
+        // Reconfigurer les credentials avec les nouveaux tokens
+        googleCalendarService.setCredentials(syncState.googleTokens);
+      } catch (refreshError) {
+        console.error('[Calendar Events] Erreur lors du rafraîchissement du token pour mise à jour:', refreshError);
       }
     }
-  });
-  
-  return response.data;
+    
+    // Mettre à jour l'événement - utiliser l'instance oauth2Client de googleCalendarService
+    const calendar = google.calendar({ 
+      version: 'v3', 
+      auth: googleCalendarService.oauth2Client 
+    });
+    
+    console.log('[Calendar Events] Tentative de mise à jour de l\'événement Google Calendar:', {
+      calendarId: 'primary',
+      eventId: googleEventId,
+      title: eventData.title,
+      authStatus: googleCalendarService.oauth2Client.credentials ? 'Authentifié' : 'Non authentifié'
+    });
+    
+    const response = await calendar.events.update({
+      calendarId: 'primary',
+      eventId: googleEventId,
+      requestBody: {
+        summary: eventData.title,
+        description: eventData.description,
+        start: {
+          dateTime: eventData.start.toISOString(),
+          timeZone: 'Europe/Paris'
+        },
+        end: {
+          dateTime: eventData.end.toISOString(),
+          timeZone: 'Europe/Paris'
+        }
+      }
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error('[Calendar Events] Erreur lors de la mise à jour de l\'événement Google Calendar:', error);
+    
+    // Si l'erreur est une erreur d'authentification (401), essayons de reconnecter l'utilisateur
+    if (error.code === 401 || (error.response && error.response.status === 401)) {
+      console.error('[Calendar Events] Erreur d\'authentification 401 - Token expiré ou invalide');
+      
+      // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
+      syncState.isConnected = false;
+      await saveSyncStateToFirestore(userId);
+    }
+    
+    throw error;
+  }
 }
 
 /**
@@ -988,15 +1038,66 @@ async function deleteGoogleCalendarEvent(userId, googleEventId) {
     throw new Error('Google Calendar n\'est pas connecté');
   }
   
-  // Configurer les credentials pour cet utilisateur
-  googleCalendarService.setCredentials(syncState.googleTokens);
+  try {
+    // Configurer les credentials pour cet utilisateur
+    googleCalendarService.setCredentials(syncState.googleTokens);
+    
+    // Rafraîchir le token si nécessaire
+    if (syncState.googleTokens.refresh_token) {
+      try {
+        console.log('[Calendar Events] Tentative de rafraîchissement préventif du token pour suppression');
+        const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
+        
+        // Mettre à jour les tokens dans la mémoire
+        syncState.googleTokens = {
+          ...newTokens,
+          refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
+        };
+        
+        // Mettre à jour les tokens dans la base de données
+        await saveSyncStateToFirestore(userId);
+        
+        console.log('[Calendar Events] Token rafraîchi avec succès pour suppression');
+        
+        // Reconfigurer les credentials avec les nouveaux tokens
+        googleCalendarService.setCredentials(syncState.googleTokens);
+      } catch (refreshError) {
+        console.error('[Calendar Events] Erreur lors du rafraîchissement du token pour suppression:', refreshError);
+      }
+    }
   
-  // Supprimer l'événement
-  const calendar = google.calendar({ version: 'v3' });
-  await calendar.events.delete({
-    calendarId: 'primary',
-    eventId: googleEventId
-  });
+    // Supprimer l'événement - utiliser l'instance oauth2Client de googleCalendarService
+    const calendar = google.calendar({ 
+      version: 'v3', 
+      auth: googleCalendarService.oauth2Client 
+    });
+    
+    console.log('[Calendar Events] Tentative de suppression de l\'événement Google Calendar:', {
+      calendarId: 'primary',
+      eventId: googleEventId,
+      authStatus: googleCalendarService.oauth2Client.credentials ? 'Authentifié' : 'Non authentifié'
+    });
+    
+    await calendar.events.delete({
+      calendarId: 'primary',
+      eventId: googleEventId
+    });
+    
+    console.log(`[Calendar Events] Événement Google Calendar ${googleEventId} supprimé avec succès`);
+  } catch (error) {
+    console.error('[Calendar Events] Erreur lors de la suppression de l\'événement Google Calendar:', error);
+    
+    // Si l'erreur est une erreur d'authentification (401), essayons de reconnecter l'utilisateur
+    if (error.code === 401 || (error.response && error.response.status === 401)) {
+      console.error('[Calendar Events] Erreur d\'authentification 401 - Token expiré ou invalide');
+      
+      // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
+      syncState.isConnected = false;
+      await saveSyncStateToFirestore(userId);
+    }
+    
+    throw error;
+  }
 }
 
 // Gérer les requêtes OPTIONS
