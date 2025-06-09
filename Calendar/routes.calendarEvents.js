@@ -17,6 +17,53 @@ const db = admin.firestore();
 const eventsCollection = db.collection('calendar_events');
 const syncStatesCollection = db.collection('google_sync_states');
 
+// Mapping des couleurs Google Calendar
+const GOOGLE_COLORS = {
+  '#7986cb': '1', // Lavender
+  '#33b679': '2', // Sage
+  '#8e24aa': '3', // Grape
+  '#e67c73': '4', // Flamingo
+  '#f6c026': '5', // Banana
+  '#f5511d': '6', // Tangerine
+  '#039be5': '7', // Peacock
+  '#616161': '8', // Graphite
+  '#3f51b5': '9', // Blueberry
+  '#0b8043': '10', // Basil
+  '#d60000': '11' // Tomato
+};
+
+// Fonction pour obtenir le colorId Google Calendar le plus proche
+function getGoogleColorId(hexColor) {
+  if (!hexColor) return '7'; // Peacock par défaut
+  
+  // Si la couleur est déjà dans le mapping
+  if (GOOGLE_COLORS[hexColor.toLowerCase()]) {
+    return GOOGLE_COLORS[hexColor.toLowerCase()];
+  }
+  
+  // Sinon retourner la couleur par défaut
+  return '7'; // Peacock
+}
+
+// Fonction pour obtenir la couleur hexadécimale depuis un colorId Google
+function getHexColorFromGoogleId(colorId) {
+  const colorMap = {
+    '1': '#7986cb', // Lavender
+    '2': '#33b679', // Sage
+    '3': '#8e24aa', // Grape
+    '4': '#e67c73', // Flamingo
+    '5': '#f6c026', // Banana
+    '6': '#f5511d', // Tangerine
+    '7': '#039be5', // Peacock
+    '8': '#616161', // Graphite
+    '9': '#3f51b5', // Blueberry
+    '10': '#0b8043', // Basil
+    '11': '#d60000' // Tomato
+  };
+  
+  return colorMap[colorId] || '#039be5'; // Peacock par défaut
+}
+
 // Configurer les en-têtes CORS
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin || 'https://capy-invest-fr.webflow.io';
@@ -242,7 +289,8 @@ router.post('/events', requireAuth, async (req, res) => {
       end: admin.firestore.Timestamp.fromDate(endDate),
       description: description || '',
       location: location || '',
-      color: color || '#039be5', // Couleur par défaut (bleu)
+      color: color || '#039be5',
+      colorId: getGoogleColorId(color),
       type: type || 'event',
       allDay: allDay || false,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -332,27 +380,23 @@ router.put('/events/:id', requireAuth, async (req, res) => {
     }
 
     // Préparer les données de mise à jour
-    const eventData = {
+    const updates = {
       title,
       start: admin.firestore.Timestamp.fromDate(startDate),
       end: admin.firestore.Timestamp.fromDate(endDate),
       description: description || '',
       location: location || '',
-      color: color || existingEvent.color || '#039be5',
-      type: type || existingEvent.type || 'event',
-      allDay: allDay !== undefined ? allDay : existingEvent.allDay || false,
+      color: color || '#039be5',
+      colorId: getGoogleColorId(color),
+      type: type || 'event',
+      allDay: allDay || false,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
 
     // Mettre à jour dans Google Calendar si nécessaire
     if (existingEvent.googleEventId) {
       try {
-        await updateGoogleCalendarEvent(req.userId, existingEvent.googleEventId, {
-          title,
-          start: startDate,
-          end: endDate,
-          description: description || ''
-        });
+        await updateGoogleCalendarEvent(req.userId, existingEvent.googleEventId, updates);
         console.log(`[Calendar Events] Événement Google Calendar mis à jour: ${existingEvent.googleEventId}`);
       } catch (googleError) {
         console.error('[Calendar Events] Erreur lors de la mise à jour dans Google Calendar:', googleError);
@@ -361,7 +405,7 @@ router.put('/events/:id', requireAuth, async (req, res) => {
     }
 
     // Mettre à jour dans Firestore
-    await eventsCollection.doc(eventId).update(eventData);
+    await eventsCollection.doc(eventId).update(updates);
     
     console.log(`[Calendar Events] Événement mis à jour: ${eventId}`);
     
@@ -882,21 +926,24 @@ async function createGoogleCalendarEvent(userId, eventData) {
     // Rafraîchir le token si nécessaire
     if (syncState.googleTokens.refresh_token) {
       try {
-        console.log('[Calendar Events] Tentative de rafraîchissement du token pour création');
+        console.log('[Calendar Events] Tentative de rafraîchissement du token avant création d\'événement');
         const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
         
         // Mettre à jour les tokens dans la mémoire
         syncState.googleTokens = {
           ...newTokens,
-          refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
+          refresh_token: syncState.googleTokens.refresh_token
         };
         
-        console.log('[Calendar Events] Token rafraîchi avec succès pour création');
+        // NOTE: Nous n'utilisons pas Firestore pour stocker les tokens, tout est en mémoire
+        // donc nous supprimons cette partie qui causait l'erreur
+        console.log('[Calendar Events] Token rafraîchi avec succès');
         
         // Reconfigurer les credentials avec les nouveaux tokens
         googleCalendarService.setCredentials(syncState.googleTokens);
       } catch (refreshError) {
-        console.error('[Calendar Events] Erreur lors du rafraîchissement du token pour création:', refreshError);
+        console.error('[Calendar Events] Erreur lors du rafraîchissement du token:', refreshError);
+        // Continuer malgré l'erreur
       }
     }
     

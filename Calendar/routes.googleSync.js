@@ -609,8 +609,9 @@ router.post('/calendar', requireAuth, async (req, res) => {
                             googleEventId: googleEventId,
                             createdAt: admin.firestore.FieldValue.serverTimestamp(),
                             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                            color: getColorFromGoogleEvent(googleEvent),
-                            type: googleEvent.description && googleEvent.description.startsWith('[TASK]') ? 'task' : 'event'
+                            color: getHexColorFromGoogleId(googleEvent.colorId),
+                            colorId: googleEvent.colorId || '7', // Peacock par défaut
+                            type: googleEvent.description && googleEvent.description.includes('[TASK]') ? 'task' : 'event'
                         };
                         
                         // Traiter les dates (all-day ou avec heure précise)
@@ -699,8 +700,7 @@ router.post('/calendar', requireAuth, async (req, res) => {
  * @param {Object} googleEvent - Événement Google Calendar
  * @returns {string} - Code couleur hexadécimal
  */
-function getColorFromGoogleEvent(googleEvent) {
-    // Mapping des colorId Google vers des couleurs hexadécimales
+function getHexColorFromGoogleId(colorId) {
     const colorMap = {
         '1': '#7986cb', // Lavender
         '2': '#33b679', // Sage
@@ -712,16 +712,10 @@ function getColorFromGoogleEvent(googleEvent) {
         '8': '#616161', // Graphite
         '9': '#3f51b5', // Blueberry
         '10': '#0b8043', // Basil
-        '11': '#d60000'  // Tomato
+        '11': '#d60000' // Tomato
     };
     
-    // Si l'événement a un colorId, utiliser la couleur correspondante
-    if (googleEvent.colorId && colorMap[googleEvent.colorId]) {
-        return colorMap[googleEvent.colorId];
-    }
-    
-    // Couleur par défaut
-    return '#039be5'; // Peacock
+    return colorMap[colorId] || '#039be5'; // Peacock par défaut
 }
 
 // Gérer les requêtes OPTIONS
