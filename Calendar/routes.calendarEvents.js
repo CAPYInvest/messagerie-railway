@@ -84,11 +84,40 @@ router.get('/events', requireAuth, async (req, res) => {
     const events = [];
     snapshot.forEach(doc => {
       const event = doc.data();
+      
+      // Fonction pour convertir différents formats de date en ISO string
+      const formatDate = (dateField) => {
+        if (!dateField) return null;
+        
+        // Si c'est un timestamp Firestore
+        if (dateField.toDate && typeof dateField.toDate === 'function') {
+          return dateField.toDate().toISOString();
+        }
+        
+        // Si c'est déjà une chaîne ISO
+        if (typeof dateField === 'string') {
+          return dateField;
+        }
+        
+        // Si c'est un objet Date
+        if (dateField instanceof Date) {
+          return dateField.toISOString();
+        }
+        
+        // Si c'est un timestamp en millisecondes
+        if (typeof dateField === 'number') {
+          return new Date(dateField).toISOString();
+        }
+        
+        // Fallback
+        return new Date().toISOString();
+      };
+      
       events.push({
         id: doc.id,
         title: event.title,
-        start: event.start.toDate().toISOString(),
-        end: event.end.toDate().toISOString(),
+        start: formatDate(event.start),
+        end: formatDate(event.end),
         description: event.description || '',
         location: event.location || '',
         googleEventId: event.googleEventId || null,
@@ -132,11 +161,39 @@ router.get('/events/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Accès non autorisé à cet événement' });
     }
 
+    // Fonction pour convertir différents formats de date en ISO string
+    const formatDate = (dateField) => {
+      if (!dateField) return null;
+      
+      // Si c'est un timestamp Firestore
+      if (dateField.toDate && typeof dateField.toDate === 'function') {
+        return dateField.toDate().toISOString();
+      }
+      
+      // Si c'est déjà une chaîne ISO
+      if (typeof dateField === 'string') {
+        return dateField;
+      }
+      
+      // Si c'est un objet Date
+      if (dateField instanceof Date) {
+        return dateField.toISOString();
+      }
+      
+      // Si c'est un timestamp en millisecondes
+      if (typeof dateField === 'number') {
+        return new Date(dateField).toISOString();
+      }
+      
+      // Fallback
+      return new Date().toISOString();
+    };
+
     res.json({
       id: eventDoc.id,
       title: event.title,
-      start: event.start.toDate().toISOString(),
-      end: event.end.toDate().toISOString(),
+      start: formatDate(event.start),
+      end: formatDate(event.end),
       description: event.description || '',
       location: event.location || '',
       googleEventId: event.googleEventId || null,
@@ -1121,15 +1178,72 @@ async function deleteGoogleCalendarEvent(userId, googleEventId) {
     throw new Error('Google Calendar n\'est pas connecté');
   }
   
-  // Configurer les credentials pour cet utilisateur
-  googleCalendarService.setCredentials(syncState.googleTokens);
-  
-  // Supprimer l'événement
-  const calendar = google.calendar({ version: 'v3' });
-  await calendar.events.delete({
-    calendarId: 'primary',
-    eventId: googleEventId
-  });
+  try {
+    // Configurer les credentials pour cet utilisateur
+    googleCalendarService.setCredentials(syncState.googleTokens);
+    
+    // Rafraîchir le token si nécessaire
+    if (syncState.googleTokens.refresh_token) {
+      try {
+        console.log('[Calendar Events] Tentative de rafraîchissement du token pour suppression');
+        const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
+        
+        // Mettre à jour les tokens dans la mémoire
+        syncState.googleTokens = {
+          ...newTokens,
+          refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
+        };
+        
+        console.log('[Calendar Events] Token rafraîchi avec succès pour suppression');
+        
+        // Reconfigurer les credentials avec les nouveaux tokens
+        googleCalendarService.setCredentials(syncState.googleTokens);
+      } catch (refreshError) {
+        console.error('[Calendar Events] Erreur lors du rafraîchissement du token pour suppression:', refreshError);
+      }
+    }
+    
+    // Supprimer l'événement
+    const calendar = google.calendar({ version: 'v3', auth: googleCalendarService.oauth2Client });
+    
+    console.log(`[Calendar Events] Tentative de suppression de l'événement Google Calendar: ${googleEventId}`);
+    
+    await calendar.events.delete({
+      calendarId: 'primary',
+      eventId: googleEventId
+    });
+    
+    console.log(`[Calendar Events] Événement Google Calendar supprimé avec succès: ${googleEventId}`);
+  } catch (error) {
+    console.error('[Calendar Events] Erreur lors de la suppression dans Google Calendar:', error);
+    
+    // Si l'erreur est une erreur d'authentification (401), essayons de reconnecter l'utilisateur
+    if (error.code === 401 || (error.response && error.response.status === 401)) {
+      console.error('[Calendar Events] Erreur d\'authentification 401 - Token expiré ou invalide');
+      
+      // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
+      syncState.isConnected = false;
+      
+      // Si syncStatesCollection est défini, mettre à jour l'état dans Firestore
+      try {
+        const syncStatesCollection = admin.firestore().collection('google_sync_states');
+        await syncStatesCollection.doc(userId).update({
+          isConnected: false,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      } catch (firestoreError) {
+        console.error('[Calendar Events] Erreur lors de la mise à jour de l\'état dans Firestore:', firestoreError);
+      }
+    }
+    
+    // Si l'erreur est "Not Found", on peut considérer que l'événement est déjà supprimé
+    if (error.code === 404 || (error.response && error.response.status === 404)) {
+      console.log(`[Calendar Events] L'événement Google Calendar ${googleEventId} n'existe pas ou a déjà été supprimé`);
+      return; // Ne pas propager l'erreur
+    }
+    
+    throw error;
+  }
 }
 
 /**
