@@ -947,22 +947,24 @@ async function createGoogleCalendarEvent(userId, eventData) {
       };
     }
 
-    // Déterminer le colorId basé sur la couleur de l'événement
+    // Déterminer le colorId en fonction de la couleur hexadécimale
+    const colorMap = {
+      '#7986cb': '1', // Lavender
+      '#33b679': '2', // Sage
+      '#8e24aa': '3', // Grape
+      '#e67c73': '4', // Flamingo
+      '#f6c026': '5', // Banana
+      '#f5511d': '6', // Tangerine
+      '#039be5': '7', // Peacock
+      '#616161': '8', // Graphite
+      '#3f51b5': '9', // Blueberry
+      '#0b8043': '10', // Basil
+      '#d60000': '11' // Tomato
+    };
+
+    // Utiliser le colorId fourni ou le convertir depuis la couleur hexadécimale
     let colorId = eventData.colorId;
     if (!colorId && eventData.color) {
-      const colorMap = {
-        '#7986cb': '1', // Lavender
-        '#33b679': '2', // Sage
-        '#8e24aa': '3', // Grape
-        '#e67c73': '4', // Flamingo
-        '#f6c026': '5', // Banana
-        '#f5511d': '6', // Tangerine
-        '#039be5': '7', // Peacock
-        '#616161': '8', // Graphite
-        '#3f51b5': '9', // Blueberry
-        '#0b8043': '10', // Basil
-        '#d60000': '11' // Tomato
-      };
       colorId = colorMap[eventData.color.toLowerCase()] || '7';
     }
 
@@ -989,7 +991,7 @@ async function createGoogleCalendarEvent(userId, eventData) {
         location: eventData.location || '',
         start,
         end,
-        colorId: colorId // Assurez-vous que le colorId est bien transmis
+        colorId: colorId // S'assurer que le colorId est bien transmis
       }
     });
 
@@ -1074,8 +1076,9 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
     }
     
     // Déterminer le colorId basé sur la couleur de l'événement
-    let colorId = eventData.colorId;
-    if (!colorId && eventData.color) {
+    let colorId = null;
+    if (eventData.color) {
+      // Map des couleurs hexadécimales vers les colorId de Google Calendar
       const colorMap = {
         '#7986cb': '1', // Lavender
         '#33b679': '2', // Sage
@@ -1090,7 +1093,13 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
         '#d60000': '11' // Tomato
       };
       
-      colorId = colorMap[eventData.color.toLowerCase()] || '7';
+      // Trouver la couleur la plus proche
+      for (const [hex, id] of Object.entries(colorMap)) {
+        if (eventData.color.toLowerCase() === hex.toLowerCase()) {
+          colorId = id;
+          break;
+        }
+      }
     }
     
     // Préparer la description en fonction du type d'événement
