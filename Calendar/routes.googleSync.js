@@ -453,6 +453,170 @@ router.get('/auth', requireAuth, (req, res) => {
     }
 });
 
+/**
+ * Route pour effectuer une synchronisation complète du calendrier
+ * POST /api/google/sync/calendar
+ */
+router.post('/calendar', requireAuth, async (req, res) => {
+    try {
+        if (!req.userId) {
+            return res.status(401).json({ error: 'Authentification requise' });
+        }
+
+        console.log(`[Google Sync] Démarrage de la synchronisation complète du calendrier pour l'utilisateur ${req.userId}`);
+        
+        // Récupérer l'état de synchronisation de l'utilisateur
+        const syncState = await getUserSyncState(req.userId);
+        
+        // Vérifier si l'utilisateur est connecté à Google Calendar
+        if (!syncState.isConnected || !syncState.googleTokens) {
+            console.error('[Google Sync] Utilisateur non connecté à Google Calendar');
+            return res.status(400).json({ 
+                error: 'Google Calendar non connecté',
+                message: 'Veuillez d\'abord connecter votre compte Google Calendar'
+            });
+        }
+        
+        try {
+            // Configurer les credentials pour cet utilisateur
+            googleCalendarService.setCredentials(syncState.googleTokens);
+            
+            // Récupérer les événements de Firestore
+            const eventsCollection = admin.firestore().collection('calendar_events');
+            const firestoreEvents = await eventsCollection.where('userId', '==', req.userId).get();
+            
+            console.log(`[Google Sync] ${firestoreEvents.size} événements trouvés dans Firestore`);
+            
+            // Récupérer les événements de Google Calendar (30 jours avant et après aujourd'hui)
+            const today = new Date();
+            const thirtyDaysAgo = new Date(today);
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+            const thirtyDaysLater = new Date(today);
+            thirtyDaysLater.setDate(today.getDate() + 30);
+            
+            const googleEvents = await googleCalendarService.listEvents(
+                'primary',
+                thirtyDaysAgo,
+                thirtyDaysLater
+            );
+            
+            console.log(`[Google Sync] ${googleEvents.length} événements trouvés dans Google Calendar`);
+            
+            // Statistiques de synchronisation
+            const stats = {
+                created: 0,
+                updated: 0,
+                deleted: 0,
+                errors: 0
+            };
+            
+            // Mapper les événements Google par ID pour faciliter la recherche
+            const googleEventsMap = new Map();
+            googleEvents.forEach(event => {
+                googleEventsMap.set(event.id, event);
+            });
+            
+            // Synchroniser les événements Firestore vers Google (création/mise à jour)
+            for (const doc of firestoreEvents.docs) {
+                const eventData = doc.data();
+                
+                try {
+                    // Si l'événement a déjà un ID Google Calendar, le mettre à jour
+                    if (eventData.googleEventId) {
+                        // Vérifier si l'événement existe toujours dans Google Calendar
+                        if (googleEventsMap.has(eventData.googleEventId)) {
+                            // Mettre à jour l'événement dans Google Calendar
+                            const { router: calendarEventsRouter } = require('./routes.calendarEvents');
+                            await calendarEventsRouter.updateGoogleCalendarEvent(
+                                req.userId,
+                                eventData.googleEventId,
+                                eventData
+                            );
+                            stats.updated++;
+                            
+                            // Retirer l'événement de la map pour marquer qu'il a été traité
+                            googleEventsMap.delete(eventData.googleEventId);
+                        } else {
+                            // L'événement a été supprimé de Google Calendar, mettre à jour l'entrée Firestore
+                            await eventsCollection.doc(doc.id).update({
+                                googleEventId: null,
+                                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                            });
+                        }
+                    } else {
+                        // Créer un nouvel événement dans Google Calendar
+                        const { router: calendarEventsRouter } = require('./routes.calendarEvents');
+                        const googleEvent = await calendarEventsRouter.createGoogleCalendarEvent(
+                            req.userId,
+                            eventData
+                        );
+                        
+                        // Mettre à jour l'ID Google Calendar dans Firestore
+                        await eventsCollection.doc(doc.id).update({
+                            googleEventId: googleEvent.id,
+                            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                        });
+                        
+                        stats.created++;
+                    }
+                } catch (eventError) {
+                    console.error(`[Google Sync] Erreur lors de la synchronisation de l'événement ${doc.id}:`, eventError);
+                    stats.errors++;
+                }
+            }
+            
+            // Mettre à jour l'état de synchronisation
+            syncState.lastSync = new Date().toISOString();
+            syncState.isSyncing = false;
+            await saveSyncStateToFirestore(req.userId);
+            
+            console.log(`[Google Sync] Synchronisation terminée avec succès: ${stats.created} créés, ${stats.updated} mis à jour, ${stats.errors} erreurs`);
+            
+            res.json({
+                success: true,
+                message: 'Synchronisation terminée avec succès',
+                stats
+            });
+        } catch (error) {
+            console.error('[Google Sync] Erreur lors de la synchronisation du calendrier:', error);
+            
+            // Si l'erreur est une erreur d'authentification, essayer de rafraîchir le token
+            if (error.code === 401 || (error.response && error.response.status === 401)) {
+                try {
+                    if (syncState.googleTokens.refresh_token) {
+                        const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
+                        syncState.googleTokens = {
+                            ...newTokens,
+                            refresh_token: syncState.googleTokens.refresh_token
+                        };
+                        await saveSyncStateToFirestore(req.userId);
+                        
+                        return res.status(401).json({
+                            error: 'Token expiré',
+                            message: 'Votre session a expiré. Veuillez réessayer la synchronisation.'
+                        });
+                    }
+                } catch (refreshError) {
+                    console.error('[Google Sync] Erreur lors du rafraîchissement du token:', refreshError);
+                    syncState.isConnected = false;
+                    await saveSyncStateToFirestore(req.userId);
+                }
+            }
+            
+            syncState.lastError = error.message;
+            await saveSyncStateToFirestore(req.userId);
+            
+            res.status(500).json({
+                error: 'Erreur lors de la synchronisation',
+                message: error.message
+            });
+        }
+    } catch (error) {
+        console.error('[Google Sync] Erreur générale lors de la synchronisation du calendrier:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la synchronisation' });
+    }
+});
+
 // Gérer les requêtes OPTIONS
 router.options('*', (req, res) => {
     setCorsHeaders(req, res);

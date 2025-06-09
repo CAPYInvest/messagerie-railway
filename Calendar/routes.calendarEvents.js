@@ -1153,4 +1153,11 @@ router.options('*', (req, res) => {
   res.sendStatus(200);
 });
 
-module.exports = { router }; 
+// Exporter le router et les fonctions utiles
+module.exports = { 
+  router,
+  createGoogleCalendarEvent,
+  updateGoogleCalendarEvent,
+  deleteGoogleCalendarEvent,
+  getUserSyncState
+}; 
