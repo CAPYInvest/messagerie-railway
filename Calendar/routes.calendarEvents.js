@@ -939,7 +939,7 @@ async function createGoogleCalendarEvent(userId, eventData) {
  */
 async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
   // Import dynamique pour éviter la dépendance circulaire
-  const { getUserSyncState } = require('./routes.googleSync');
+  const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
   
   const syncState = await getUserSyncState(userId);
   
@@ -980,7 +980,7 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
  */
 async function deleteGoogleCalendarEvent(userId, googleEventId) {
   // Import dynamique pour éviter la dépendance circulaire
-  const { getUserSyncState } = require('./routes.googleSync');
+  const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
   
   const syncState = await getUserSyncState(userId);
   
