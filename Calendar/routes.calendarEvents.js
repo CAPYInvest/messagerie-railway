@@ -10,6 +10,7 @@ const { requireAuth } = require('../middlewareauth');
 const admin = require('firebase-admin');
 const { google } = require('googleapis');
 const googleCalendarService = require('./googleCalendar');
+const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
 
 // Référence à la collection Firestore
 // Utiliser getFirestore() pour accéder à l'instance Firestore déjà initialisée
@@ -178,7 +179,7 @@ router.post('/events', requireAuth, async (req, res) => {
     };
 
     // Vérifier si l'utilisateur a connecté Google Calendar
-    const syncState = getUserSyncState(req.userId);
+    const syncState = await getUserSyncState(req.userId);
     
     if (syncState && syncState.isConnected && syncState.googleTokens) {
       try {
@@ -364,7 +365,7 @@ router.post('/sync', requireAuth, async (req, res) => {
     }
 
     // Vérifier si l'utilisateur a connecté Google Calendar
-    const syncState = getUserSyncState(req.userId);
+    const syncState = await getUserSyncState(req.userId);
     
     if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
       return res.status(400).json({ 
@@ -457,10 +458,7 @@ router.post('/sync', requireAuth, async (req, res) => {
           };
           
           // Mettre à jour les tokens dans la base de données
-          await syncStatesCollection.doc(req.userId).update({
-            googleTokens: syncState.googleTokens,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          });
+          await saveSyncStateToFirestore(req.userId);
           
           console.log('[Calendar Events] Token rafraîchi avec succès');
           
@@ -808,8 +806,13 @@ async function createGoogleCalendarEvent(userId, eventData) {
           refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
         };
         
-        // Persister les changements
-        await saveSyncStateToFirestore(userId);
+        // Mettre à jour les tokens dans la base de données
+        await saveSyncStateToFirestore(req.userId);
+        
+        console.log('[Calendar Events] Token rafraîchi avec succès');
+        
+        // Reconfigurer les credentials avec les nouveaux tokens
+        googleCalendarService.setCredentials(syncState.googleTokens);
       } catch (refreshError) {
         console.error('[Calendar Events] Erreur lors du rafraîchissement du token:', refreshError);
         // On continue malgré l'erreur, car le token actuel pourrait encore être valide
@@ -918,7 +921,7 @@ async function createGoogleCalendarEvent(userId, eventData) {
  * @returns {Promise<Object>} - Événement Google Calendar mis à jour
  */
 async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
-  const syncState = getUserSyncState(userId);
+  const syncState = await getUserSyncState(userId);
   
   if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
     throw new Error('Google Calendar n\'est pas connecté');
@@ -956,7 +959,7 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
  * @returns {Promise<void>}
  */
 async function deleteGoogleCalendarEvent(userId, googleEventId) {
-  const syncState = getUserSyncState(userId);
+  const syncState = await getUserSyncState(userId);
   
   if (!syncState || !syncState.isConnected || !syncState.googleTokens) {
     throw new Error('Google Calendar n\'est pas connecté');
@@ -971,21 +974,6 @@ async function deleteGoogleCalendarEvent(userId, googleEventId) {
     calendarId: 'primary',
     eventId: googleEventId
   });
-}
-
-/**
- * Récupère l'état de synchronisation d'un utilisateur
- * @param {string} userId - ID de l'utilisateur
- * @returns {Object|null} - État de synchronisation
- */
-function getUserSyncState(userId) {
-  // Réutiliser la fonction existante du module routes.googleSync
-  if (typeof require('./routes.googleSync').getUserSyncState === 'function') {
-    return require('./routes.googleSync').getUserSyncState(userId);
-  }
-  
-  // Fallback si la fonction n'est pas disponible
-  return null;
 }
 
 // Gérer les requêtes OPTIONS
