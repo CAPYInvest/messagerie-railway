@@ -280,12 +280,39 @@ router.post('/calendar', requireAuth, async (req, res) => {
                 }
             });
 
+            // D'abord récupérer le contenu en texte pour éviter les erreurs de parsing JSON
+            const responseText = await response.text();
+            
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || `Erreur HTTP: ${response.status}`);
+                let errorMessage = `Erreur HTTP: ${response.status}`;
+                try {
+                    // Essayer de parser le JSON seulement si c'est possible
+                    const errorData = JSON.parse(responseText);
+                    if (errorData && errorData.error) {
+                        errorMessage = errorData.error;
+                    }
+                } catch (parseError) {
+                    console.error('[Google Sync] Erreur lors du parsing JSON de la réponse d\'erreur:', parseError);
+                    console.error('[Google Sync] Réponse reçue:', responseText);
+                    // Utiliser un texte d'erreur générique si la réponse est trop longue (probablement du HTML)
+                    if (responseText && responseText.length > 100) {
+                        errorMessage = 'Erreur serveur (réponse non-JSON)';
+                    } else if (responseText) {
+                        errorMessage = responseText;
+                    }
+                }
+                
+                throw new Error(errorMessage);
             }
 
-            const result = await response.json();
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (parseError) {
+                console.error('[Google Sync] Erreur lors du parsing JSON de la réponse:', parseError);
+                console.error('[Google Sync] Réponse reçue:', responseText.substring(0, 200) + '...');
+                throw new Error('Réponse serveur invalide (non-JSON)');
+            }
 
             // Mettre à jour l'état de synchronisation
             syncState.lastSync = new Date().toISOString();
