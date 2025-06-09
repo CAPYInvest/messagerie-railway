@@ -882,24 +882,21 @@ async function createGoogleCalendarEvent(userId, eventData) {
     // Rafraîchir le token si nécessaire
     if (syncState.googleTokens.refresh_token) {
       try {
-        console.log('[Calendar Events] Tentative de rafraîchissement du token avant création d\'événement');
+        console.log('[Calendar Events] Tentative de rafraîchissement du token pour création');
         const newTokens = await googleCalendarService.refreshToken(syncState.googleTokens.refresh_token);
         
         // Mettre à jour les tokens dans la mémoire
         syncState.googleTokens = {
           ...newTokens,
-          refresh_token: syncState.googleTokens.refresh_token
+          refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
         };
         
-        // NOTE: Nous n'utilisons pas Firestore pour stocker les tokens, tout est en mémoire
-        // donc nous supprimons cette partie qui causait l'erreur
-        console.log('[Calendar Events] Token rafraîchi avec succès');
+        console.log('[Calendar Events] Token rafraîchi avec succès pour création');
         
         // Reconfigurer les credentials avec les nouveaux tokens
         googleCalendarService.setCredentials(syncState.googleTokens);
       } catch (refreshError) {
-        console.error('[Calendar Events] Erreur lors du rafraîchissement du token:', refreshError);
-        // Continuer malgré l'erreur
+        console.error('[Calendar Events] Erreur lors du rafraîchissement du token pour création:', refreshError);
       }
     }
     
