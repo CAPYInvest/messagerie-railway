@@ -468,11 +468,19 @@ async function syncCalendarRoute(req, res) {
             refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
           };
           
-          // Import dynamique pour éviter la dépendance circulaire
-          const { saveSyncStateToFirestore } = require('./routes.googleSync');
-          
-          // Mettre à jour les tokens dans la base de données
-          await saveSyncStateToFirestore(req.userId);
+          // Mettre à jour les tokens dans la base de données sans utiliser saveSyncStateToFirestore
+          // Accéder directement à Firestore
+          try {
+            await admin.firestore().collection('google_sync_states').doc(req.userId).set({
+              googleTokens: syncState.googleTokens,
+              isConnected: syncState.isConnected,
+              lastSync: syncState.lastSync,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log('[Calendar Events] État de synchronisation sauvegardé dans Firestore pour l\'utilisateur', req.userId);
+          } catch (firestoreError) {
+            console.error('[Calendar Events] Erreur lors de la sauvegarde dans Firestore:', firestoreError);
+          }
           
           console.log('[Calendar Events] Token rafraîchi avec succès');
           
@@ -799,7 +807,9 @@ async function syncCalendarRoute(req, res) {
  */
 async function createGoogleCalendarEvent(userId, eventData) {
   // Import dynamique pour éviter la dépendance circulaire
-  const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
+  // Utiliser une approche différente pour éviter l'erreur TypeError
+  const googleSyncModule = require('./routes.googleSync');
+  const getUserSyncState = googleSyncModule.getUserSyncState;
   
   const syncState = await getUserSyncState(userId);
   
@@ -823,8 +833,19 @@ async function createGoogleCalendarEvent(userId, eventData) {
           refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
         };
         
-        // Mettre à jour les tokens dans la base de données
-        await saveSyncStateToFirestore(userId);
+        // Mettre à jour les tokens dans la base de données sans utiliser saveSyncStateToFirestore
+        // Accéder directement à Firestore
+        try {
+          await admin.firestore().collection('google_sync_states').doc(userId).set({
+            googleTokens: syncState.googleTokens,
+            isConnected: syncState.isConnected,
+            lastSync: syncState.lastSync,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          console.log('[Calendar Events] État de synchronisation sauvegardé dans Firestore pour l\'utilisateur', userId);
+        } catch (firestoreError) {
+          console.error('[Calendar Events] Erreur lors de la sauvegarde dans Firestore:', firestoreError);
+        }
         
         console.log('[Calendar Events] Token rafraîchi avec succès');
         
@@ -923,7 +944,16 @@ async function createGoogleCalendarEvent(userId, eventData) {
       
       // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
       syncState.isConnected = false;
-      await saveSyncStateToFirestore(userId);
+      
+      // Sauvegarder directement dans Firestore
+      try {
+        await admin.firestore().collection('google_sync_states').doc(userId).set({
+          isConnected: false,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } catch (firestoreError) {
+        console.error('[Calendar Events] Erreur lors de la sauvegarde dans Firestore:', firestoreError);
+      }
     }
     
     throw error;
@@ -939,7 +969,9 @@ async function createGoogleCalendarEvent(userId, eventData) {
  */
 async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
   // Import dynamique pour éviter la dépendance circulaire
-  const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
+  // Utiliser une approche différente pour éviter l'erreur TypeError
+  const googleSyncModule = require('./routes.googleSync');
+  const getUserSyncState = googleSyncModule.getUserSyncState;
   
   const syncState = await getUserSyncState(userId);
   
@@ -963,8 +995,19 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
           refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
         };
         
-        // Mettre à jour les tokens dans la base de données
-        await saveSyncStateToFirestore(userId);
+        // Mettre à jour les tokens dans la base de données sans utiliser saveSyncStateToFirestore
+        // Accéder directement à Firestore
+        try {
+          await admin.firestore().collection('google_sync_states').doc(userId).set({
+            googleTokens: syncState.googleTokens,
+            isConnected: syncState.isConnected,
+            lastSync: syncState.lastSync,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          console.log('[Calendar Events] État de synchronisation sauvegardé dans Firestore pour l\'utilisateur', userId);
+        } catch (firestoreError) {
+          console.error('[Calendar Events] Erreur lors de la sauvegarde dans Firestore:', firestoreError);
+        }
         
         console.log('[Calendar Events] Token rafraîchi avec succès pour mise à jour');
         
@@ -1015,7 +1058,16 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
       
       // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
       syncState.isConnected = false;
-      await saveSyncStateToFirestore(userId);
+      
+      // Sauvegarder directement dans Firestore
+      try {
+        await admin.firestore().collection('google_sync_states').doc(userId).set({
+          isConnected: false,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } catch (firestoreError) {
+        console.error('[Calendar Events] Erreur lors de la sauvegarde dans Firestore:', firestoreError);
+      }
     }
     
     throw error;
@@ -1030,7 +1082,9 @@ async function updateGoogleCalendarEvent(userId, googleEventId, eventData) {
  */
 async function deleteGoogleCalendarEvent(userId, googleEventId) {
   // Import dynamique pour éviter la dépendance circulaire
-  const { getUserSyncState, saveSyncStateToFirestore } = require('./routes.googleSync');
+  // Utiliser une approche différente pour éviter l'erreur TypeError
+  const googleSyncModule = require('./routes.googleSync');
+  const getUserSyncState = googleSyncModule.getUserSyncState;
   
   const syncState = await getUserSyncState(userId);
   
@@ -1054,8 +1108,19 @@ async function deleteGoogleCalendarEvent(userId, googleEventId) {
           refresh_token: syncState.googleTokens.refresh_token // Préserver le refresh_token
         };
         
-        // Mettre à jour les tokens dans la base de données
-        await saveSyncStateToFirestore(userId);
+        // Mettre à jour les tokens dans la base de données sans utiliser saveSyncStateToFirestore
+        // Accéder directement à Firestore
+        try {
+          await admin.firestore().collection('google_sync_states').doc(userId).set({
+            googleTokens: syncState.googleTokens,
+            isConnected: syncState.isConnected,
+            lastSync: syncState.lastSync,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          console.log('[Calendar Events] État de synchronisation sauvegardé dans Firestore pour l\'utilisateur', userId);
+        } catch (firestoreError) {
+          console.error('[Calendar Events] Erreur lors de la sauvegarde dans Firestore:', firestoreError);
+        }
         
         console.log('[Calendar Events] Token rafraîchi avec succès pour suppression');
         
@@ -1093,7 +1158,16 @@ async function deleteGoogleCalendarEvent(userId, googleEventId) {
       
       // Marquer l'utilisateur comme déconnecté pour forcer une reconnexion
       syncState.isConnected = false;
-      await saveSyncStateToFirestore(userId);
+      
+      // Sauvegarder directement dans Firestore
+      try {
+        await admin.firestore().collection('google_sync_states').doc(userId).set({
+          isConnected: false,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } catch (firestoreError) {
+        console.error('[Calendar Events] Erreur lors de la sauvegarde dans Firestore:', firestoreError);
+      }
     }
     
     throw error;
