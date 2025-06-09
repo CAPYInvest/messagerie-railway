@@ -483,21 +483,40 @@ router.post('/calendar', requireAuth, async (req, res) => {
             
             // Récupérer les événements de Firestore
             const eventsCollection = admin.firestore().collection('calendar_events');
-            const firestoreEvents = await eventsCollection.where('userId', '==', req.userId).get();
+            const firestoreEventsSnapshot = await eventsCollection.where('userId', '==', req.userId).get();
             
-            console.log(`[Google Sync] ${firestoreEvents.size} événements trouvés dans Firestore`);
+            // Convertir les documents Firestore en objets plus faciles à manipuler
+            const firestoreEvents = [];
+            const firestoreEventsMap = new Map(); // Map pour recherche rapide par ID
+            const firestoreEventsByGoogleId = new Map(); // Map pour recherche rapide par Google ID
             
-            // Récupérer les événements de Google Calendar (30 jours avant et après aujourd'hui)
+            firestoreEventsSnapshot.forEach(doc => {
+                const event = {
+                    id: doc.id,
+                    ...doc.data()
+                };
+                firestoreEvents.push(event);
+                firestoreEventsMap.set(doc.id, event);
+                
+                // Si l'événement a un ID Google, l'ajouter à la map correspondante
+                if (event.googleEventId) {
+                    firestoreEventsByGoogleId.set(event.googleEventId, event);
+                }
+            });
+            
+            console.log(`[Google Sync] ${firestoreEvents.length} événements trouvés dans Firestore`);
+            
+            // Récupérer les événements de Google Calendar (60 jours avant et après aujourd'hui)
             const today = new Date();
-            const thirtyDaysAgo = new Date(today);
-            thirtyDaysAgo.setDate(today.getDate() - 30);
-            const thirtyDaysLater = new Date(today);
-            thirtyDaysLater.setDate(today.getDate() + 30);
+            const sixtyDaysAgo = new Date(today);
+            sixtyDaysAgo.setDate(today.getDate() - 60);
+            const sixtyDaysLater = new Date(today);
+            sixtyDaysLater.setDate(today.getDate() + 60);
             
             const googleEvents = await googleCalendarService.listEvents(
                 'primary',
-                thirtyDaysAgo,
-                thirtyDaysLater
+                sixtyDaysAgo,
+                sixtyDaysLater
             );
             
             console.log(`[Google Sync] ${googleEvents.length} événements trouvés dans Google Calendar`);
@@ -506,6 +525,7 @@ router.post('/calendar', requireAuth, async (req, res) => {
             const stats = {
                 created: 0,
                 updated: 0,
+                imported: 0,
                 deleted: 0,
                 errors: 0
             };
@@ -516,51 +536,108 @@ router.post('/calendar', requireAuth, async (req, res) => {
                 googleEventsMap.set(event.id, event);
             });
             
-            // Synchroniser les événements Firestore vers Google (création/mise à jour)
-            for (const doc of firestoreEvents.docs) {
-                const eventData = doc.data();
-                
+            // 1. SYNCHRONISATION FIRESTORE -> GOOGLE (création/mise à jour)
+            console.log('[Google Sync] Étape 1: Synchronisation Firestore -> Google Calendar');
+            for (const event of firestoreEvents) {
                 try {
                     // Si l'événement a déjà un ID Google Calendar, le mettre à jour
-                    if (eventData.googleEventId) {
+                    if (event.googleEventId) {
                         // Vérifier si l'événement existe toujours dans Google Calendar
-                        if (googleEventsMap.has(eventData.googleEventId)) {
+                        if (googleEventsMap.has(event.googleEventId)) {
                             // Mettre à jour l'événement dans Google Calendar
-                            const { router: calendarEventsRouter } = require('./routes.calendarEvents');
-                            await calendarEventsRouter.updateGoogleCalendarEvent(
+                            const { updateGoogleCalendarEvent } = require('./routes.calendarEvents');
+                            await updateGoogleCalendarEvent(
                                 req.userId,
-                                eventData.googleEventId,
-                                eventData
+                                event.googleEventId,
+                                event
                             );
                             stats.updated++;
+                            console.log(`[Google Sync] Événement mis à jour dans Google Calendar: ${event.id} -> ${event.googleEventId}`);
                             
                             // Retirer l'événement de la map pour marquer qu'il a été traité
-                            googleEventsMap.delete(eventData.googleEventId);
+                            googleEventsMap.delete(event.googleEventId);
                         } else {
                             // L'événement a été supprimé de Google Calendar, mettre à jour l'entrée Firestore
-                            await eventsCollection.doc(doc.id).update({
+                            await eventsCollection.doc(event.id).update({
                                 googleEventId: null,
                                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
                             });
+                            console.log(`[Google Sync] Événement supprimé de Google Calendar, mise à jour dans Firestore: ${event.id}`);
                         }
                     } else {
                         // Créer un nouvel événement dans Google Calendar
-                        const { router: calendarEventsRouter } = require('./routes.calendarEvents');
-                        const googleEvent = await calendarEventsRouter.createGoogleCalendarEvent(
+                        const { createGoogleCalendarEvent } = require('./routes.calendarEvents');
+                        const googleEvent = await createGoogleCalendarEvent(
                             req.userId,
-                            eventData
+                            event
                         );
                         
                         // Mettre à jour l'ID Google Calendar dans Firestore
-                        await eventsCollection.doc(doc.id).update({
+                        await eventsCollection.doc(event.id).update({
                             googleEventId: googleEvent.id,
                             updatedAt: admin.firestore.FieldValue.serverTimestamp()
                         });
                         
                         stats.created++;
+                        console.log(`[Google Sync] Événement créé dans Google Calendar: ${event.id} -> ${googleEvent.id}`);
                     }
                 } catch (eventError) {
-                    console.error(`[Google Sync] Erreur lors de la synchronisation de l'événement ${doc.id}:`, eventError);
+                    console.error(`[Google Sync] Erreur lors de la synchronisation de l'événement ${event.id}:`, eventError);
+                    stats.errors++;
+                }
+            }
+            
+            // 2. SYNCHRONISATION GOOGLE -> FIRESTORE (importation des nouveaux événements)
+            console.log('[Google Sync] Étape 2: Synchronisation Google Calendar -> Firestore');
+            
+            // Traiter les événements Google restants (ceux qui n'ont pas été traités dans l'étape 1)
+            for (const [googleEventId, googleEvent] of googleEventsMap.entries()) {
+                try {
+                    // Ignorer les événements supprimés ou les instances d'événements récurrents
+                    if (googleEvent.status === 'cancelled' || googleEvent.recurringEventId) {
+                        continue;
+                    }
+                    
+                    // Vérifier si cet événement Google existe déjà dans Firestore
+                    if (!firestoreEventsByGoogleId.has(googleEventId)) {
+                        // Convertir l'événement Google en format compatible avec notre application
+                        const newEvent = {
+                            userId: req.userId,
+                            title: googleEvent.summary || 'Sans titre',
+                            description: googleEvent.description || '',
+                            location: googleEvent.location || '',
+                            googleEventId: googleEventId,
+                            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                            color: getColorFromGoogleEvent(googleEvent),
+                            type: googleEvent.description && googleEvent.description.startsWith('[TASK]') ? 'task' : 'event'
+                        };
+                        
+                        // Traiter les dates (all-day ou avec heure précise)
+                        if (googleEvent.start.date) {
+                            // Événement sur la journée entière
+                            newEvent.allDay = true;
+                            newEvent.start = new Date(googleEvent.start.date).toISOString();
+                            
+                            // Pour les événements all-day, Google utilise une date exclusive pour la fin
+                            // Il faut donc soustraire un jour
+                            const endDate = new Date(googleEvent.end.date);
+                            endDate.setDate(endDate.getDate() - 1);
+                            newEvent.end = endDate.toISOString();
+                        } else {
+                            // Événement avec heure précise
+                            newEvent.allDay = false;
+                            newEvent.start = new Date(googleEvent.start.dateTime).toISOString();
+                            newEvent.end = new Date(googleEvent.end.dateTime).toISOString();
+                        }
+                        
+                        // Ajouter l'événement à Firestore
+                        await eventsCollection.add(newEvent);
+                        stats.imported++;
+                        console.log(`[Google Sync] Événement importé de Google Calendar: ${googleEventId}`);
+                    }
+                } catch (importError) {
+                    console.error(`[Google Sync] Erreur lors de l'importation de l'événement Google ${googleEventId}:`, importError);
                     stats.errors++;
                 }
             }
@@ -570,7 +647,7 @@ router.post('/calendar', requireAuth, async (req, res) => {
             syncState.isSyncing = false;
             await saveSyncStateToFirestore(req.userId);
             
-            console.log(`[Google Sync] Synchronisation terminée avec succès: ${stats.created} créés, ${stats.updated} mis à jour, ${stats.errors} erreurs`);
+            console.log(`[Google Sync] Synchronisation terminée avec succès: ${stats.created} créés, ${stats.updated} mis à jour, ${stats.imported} importés, ${stats.errors} erreurs`);
             
             res.json({
                 success: true,
@@ -616,6 +693,36 @@ router.post('/calendar', requireAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur lors de la synchronisation' });
     }
 });
+
+/**
+ * Extrait la couleur d'un événement Google Calendar
+ * @param {Object} googleEvent - Événement Google Calendar
+ * @returns {string} - Code couleur hexadécimal
+ */
+function getColorFromGoogleEvent(googleEvent) {
+    // Mapping des colorId Google vers des couleurs hexadécimales
+    const colorMap = {
+        '1': '#7986cb', // Lavender
+        '2': '#33b679', // Sage
+        '3': '#8e24aa', // Grape
+        '4': '#e67c73', // Flamingo
+        '5': '#f6c026', // Banana
+        '6': '#f5511d', // Tangerine
+        '7': '#039be5', // Peacock
+        '8': '#616161', // Graphite
+        '9': '#3f51b5', // Blueberry
+        '10': '#0b8043', // Basil
+        '11': '#d60000'  // Tomato
+    };
+    
+    // Si l'événement a un colorId, utiliser la couleur correspondante
+    if (googleEvent.colorId && colorMap[googleEvent.colorId]) {
+        return colorMap[googleEvent.colorId];
+    }
+    
+    // Couleur par défaut
+    return '#039be5'; // Peacock
+}
 
 // Gérer les requêtes OPTIONS
 router.options('*', (req, res) => {
