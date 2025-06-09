@@ -95,7 +95,7 @@ const db = admin.firestore();
 // Après cette ligne : const db = admin.firestore();
 // IMPORTANT: Importer les routes qui utilisent Firebase seulement APRÈS l'initialisation de Firebase
 const { router: googleSyncRoutes } = require('./Calendar/routes.googleSync');
-const calendarEventsRouter = require('./Calendar/routes.calendarEvents');
+const { router: calendarEventsRouter } = require('./Calendar/routes.calendarEvents');
 
 //Import route token
 app.use('/api', authRoutes);
