@@ -489,21 +489,6 @@ router.post('/sync', requireAuth, async (req, res) => {
     let deleted = 0;
     let errors = 0;
 
-    // Récupérer tous les événements de l'utilisateur depuis Firestore
-    const snapshot = await eventsCollection
-      .where('userId', '==', req.userId)
-      .get();
-
-    // Créer une Map des événements Firestore pour un accès rapide
-    const firestoreEvents = new Map();
-    snapshot.forEach(doc => {
-      const event = doc.data();
-      firestoreEvents.set(doc.id, { ...event, id: doc.id });
-      if (event.googleEventId) {
-        firestoreEventsByGoogleId.set(event.googleEventId, { ...event, id: doc.id });
-      }
-    });
-
     // Récupérer les événements de Google Calendar
     const calendar = google.calendar({ version: 'v3', auth: googleCalendarService.oauth2Client });
     const googleEvents = await calendar.events.list({
@@ -511,7 +496,7 @@ router.post('/sync', requireAuth, async (req, res) => {
       timeMin: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 jours dans le passé
       timeMax: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), // 1 an dans le futur
       singleEvents: true,
-      showDeleted: true // Important : récupérer aussi les événements supprimés
+      showDeleted: true // Important pour détecter les événements supprimés
     });
 
     // Créer un Set des IDs Google Calendar actifs
@@ -519,82 +504,38 @@ router.post('/sync', requireAuth, async (req, res) => {
 
     // Traiter les événements Google Calendar
     for (const googleEvent of googleEvents.data.items) {
-      try {
-        // Ignorer les événements récurrents
-        if (googleEvent.recurringEventId) continue;
-
-        if (googleEvent.status === 'cancelled') {
-          // L'événement a été supprimé dans Google Calendar
-          const firestoreEvent = Array.from(firestoreEvents.values())
-            .find(e => e.googleEventId === googleEvent.id);
-
-          if (firestoreEvent) {
-            // Supprimer l'événement de Firestore
-            await eventsCollection.doc(firestoreEvent.id).delete();
-            deleted++;
-            console.log(`[Calendar Events] Événement supprimé de Firestore: ${firestoreEvent.id}`);
-          }
-          continue;
-        }
-
-        // Ajouter l'ID à la liste des événements actifs
-        activeGoogleEventIds.add(googleEvent.id);
-
-        // Convertir les dates
-        const startDate = googleEvent.start.dateTime ? new Date(googleEvent.start.dateTime) :
-                         new Date(googleEvent.start.date);
-        const endDate = googleEvent.end.dateTime ? new Date(googleEvent.end.dateTime) :
-                       new Date(googleEvent.end.date);
-
-        // Créer ou mettre à jour l'événement dans Firestore
-        const eventData = {
-          userId: req.userId,
-          title: googleEvent.summary || 'Sans titre',
-          start: admin.firestore.Timestamp.fromDate(startDate),
-          end: admin.firestore.Timestamp.fromDate(endDate),
-          description: googleEvent.description || '',
-          location: googleEvent.location || '',
-          googleEventId: googleEvent.id,
-          color: getHexColorFromGoogleId(googleEvent.colorId),
-          colorId: googleEvent.colorId || '7',
-          type: googleEvent.description?.includes('[TASK]') ? 'task' : 'event',
-          allDay: !googleEvent.start.dateTime,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        };
-
-        // Chercher si l'événement existe déjà
-        const existingEvent = Array.from(firestoreEvents.values())
-          .find(e => e.googleEventId === googleEvent.id);
-
-        if (existingEvent) {
-          // Mettre à jour l'événement existant
-          await eventsCollection.doc(existingEvent.id).update(eventData);
-          updated++;
-        } else {
-          // Créer un nouvel événement
-          eventData.createdAt = admin.firestore.FieldValue.serverTimestamp();
-          await eventsCollection.add(eventData);
-          created++;
-        }
-      } catch (error) {
-        console.error(`[Calendar Events] Erreur lors du traitement de l'événement Google:`, error);
-        errors++;
+      if (!googleEvent.status || googleEvent.status === 'cancelled') {
+        continue; // Ignorer les événements supprimés pour l'instant
       }
+      activeGoogleEventIds.add(googleEvent.id);
     }
+
+    // Récupérer tous les événements de Firestore
+    const firestoreSnapshot = await eventsCollection
+      .where('userId', '==', req.userId)
+      .get();
 
     // Supprimer les événements qui n'existent plus dans Google Calendar
-    for (const [, firestoreEvent] of firestoreEvents) {
-      if (firestoreEvent.googleEventId && !activeGoogleEventIds.has(firestoreEvent.googleEventId)) {
-        try {
-          await eventsCollection.doc(firestoreEvent.id).delete();
-          deleted++;
-          console.log(`[Calendar Events] Événement supprimé car n'existe plus dans Google Calendar: ${firestoreEvent.id}`);
-        } catch (error) {
-          console.error(`[Calendar Events] Erreur lors de la suppression de l'événement:`, error);
-          errors++;
-        }
+    const deletePromises = [];
+    firestoreSnapshot.forEach(doc => {
+      const event = doc.data();
+      if (event.googleEventId && !activeGoogleEventIds.has(event.googleEventId)) {
+        console.log(`[Calendar Events] Suppression de l'événement ${doc.id} car supprimé dans Google Calendar`);
+        deletePromises.push(
+          eventsCollection.doc(doc.id).delete()
+            .then(() => {
+              deleted++;
+            })
+            .catch(error => {
+              console.error(`[Calendar Events] Erreur lors de la suppression de l'événement ${doc.id}:`, error);
+              errors++;
+            })
+        );
       }
-    }
+    });
+
+    // Attendre que toutes les suppressions soient terminées
+    await Promise.all(deletePromises);
 
     // Mettre à jour l'état de synchronisation
     await syncStatesCollection.doc(req.userId).update({
@@ -605,7 +546,12 @@ router.post('/sync', requireAuth, async (req, res) => {
     res.json({
       success: true,
       message: 'Synchronisation terminée',
-      stats: { created, updated, deleted, errors }
+      stats: {
+        created,
+        updated,
+        deleted,
+        errors
+      }
     });
   } catch (error) {
     console.error('[Calendar Events] Erreur lors de la synchronisation:', error);
